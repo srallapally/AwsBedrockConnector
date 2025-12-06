@@ -1,0 +1,24 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="MisspelledHeader" enabled="true" level="WEAK WARNING" enabled_by_default="true">
+      <option name="CUSTOM_HEADERS">
+        <header value="Build-Jdk-Spec" />
+        <header value="Bundle-Description" />
+        <header value="Bundle-License" />
+        <header value="Bundle-ManifestVersion" />
+        <header value="Bundle-Name" />
+        <header value="Bundle-SymbolicName" />
+        <header value="Bundle-Version" />
+        <header value="ConnectorBundle-FrameworkVersion" />
+        <header value="ConnectorBundle-Name" />
+        <header value="ConnectorBundle-Version" />
+        <header value="Embed-Directory" />
+        <header value="Embed-Transitive" />
+        <header value="Export-Package" />
+        <header value="Implementation-Build" />
+        <header value="Require-Capability" />
+      </option>
+    </inspection_tool>
+  </profile>
+</component>

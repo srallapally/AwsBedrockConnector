@@ -1,0 +1,190 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Adjust these if you want different coordinates -->
+    <groupId>org.forgerock.openicf.connectors</groupId>
+    <artifactId>awsbedrock-connector</artifactId>
+    <version>1.5.20.29</version>
+    <packaging>bundle</packaging>
+
+    <name>AWS Bedrock Connector</name>
+    <description>OpenICF connector for AWS Bedrock Agents</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+
+        <!-- Align all AWS SDK v2 modules via BOM -->
+        <aws.sdk.version>2.39.5</aws.sdk.version>
+        <jackson.version>2.16.1</jackson.version>
+        <!-- Felix bundle plugin version -->
+        <maven.bundle.plugin.version>5.1.9</maven.bundle.plugin.version>
+    </properties>
+    <dependencyManagement>
+        <dependencies>
+            <!-- AWS SDK v2 BOM -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws.sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- OpenICF framework: provided by Ping/ForgeRock runtime -->
+        <dependency>
+            <groupId>org.forgerock.openicf.framework</groupId>
+            <artifactId>connector-framework</artifactId>
+            <version>1.5.20.29</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.forgerock.openicf.framework</groupId>
+            <artifactId>connector-framework-internal</artifactId>
+            <version>1.5.20.29</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- AWS SDK modules (versions come from BOM above) -->
+        <!-- AWS IAM V2 SDK for scanning InvokeAgent IAM policies -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>iam</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>bedrock</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>bedrockagent</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>auth</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>regions</artifactId>
+        </dependency>
+        <!-- Core + JSON protocol explicitly included to avoid CNF issues -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sdk-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>aws-json-protocol</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+        </dependency>
+        <!-- Jackson; often pulled transitively, but make it explicit for clarity -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>${jackson.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <version>${jackson.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-cbor</artifactId>
+            <version>2.16.1</version>
+        </dependency>
+
+        <!-- Add test deps here if you have them (JUnit, Mockito, etc.) -->
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Compile with Java 17 -->
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <source>${maven.compiler.source}</source>
+                    <target>${maven.compiler.target}</target>
+                </configuration>
+            </plugin>
+
+            <!-- Bundle / OSGi manifest generation -->
+            <plugin>
+                <groupId>org.apache.felix</groupId>
+                <artifactId>maven-bundle-plugin</artifactId>
+                <version>${maven.bundle.plugin.version}</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <instructions>
+
+                        <!-- Bundle identity -->
+                        <Bundle-Name>AWS Bedrock Connector</Bundle-Name>
+                        <Bundle-SymbolicName>org.forgerock.openicf.connectors.awsbedrock-connector</Bundle-SymbolicName>
+                        <Bundle-Version>${project.version}</Bundle-Version>
+                        <Bundle-Description>Connector for AWS Bedrock Agents</Bundle-Description>
+                        <Bundle-Vendor>ForgeRock AS</Bundle-Vendor>
+                        <Bundle-License>http://opensource.org/licenses/CDDL-1.0</Bundle-License>
+
+                        <!-- Connector bundle metadata -->
+                        <ConnectorBundle-FrameworkVersion>1.5</ConnectorBundle-FrameworkVersion>
+                        <ConnectorBundle-Name>org.forgerock.openicf.connectors.awsbedrock-connector</ConnectorBundle-Name>
+                        <ConnectorBundle-Version>${project.version}</ConnectorBundle-Version>
+
+                        <!-- Implementation metadata -->
+                        <Implementation-Build>0</Implementation-Build>
+                        <Implementation-Title>AWS Bedrock Connector</Implementation-Title>
+                        <Implementation-Vendor>ForgeRock AS</Implementation-Vendor>
+                        <Implementation-Vendor-Id>org.forgerock.openicf.connectors</Implementation-Vendor-Id>
+                        <Implementation-Version>${project.version}</Implementation-Version>
+
+                        <!-- Java runtime requirement -->
+                        <Require-Capability>
+                            osgi.ee;filter:="(&amp;(osgi.ee=JavaSE)(version>=17))"
+                        </Require-Capability>
+
+                        <!-- Export our connector packages -->
+                        <Export-Package>
+                            org.forgerock.openicf.connectors.awsbedrock*;version="${project.version}"
+                        </Export-Package>
+
+                        <Import-Package>
+                            org.identityconnectors.common*;version="[1.5,2)",
+                            org.identityconnectors.framework.common*;version="[1.5,2)",
+                            org.identityconnectors.framework.spi*;version="[1.5,2)",
+                            org.slf4j.*,
+                            software.amazon.awssdk.*,
+                            com.fasterxml.jackson.*,
+                            *
+                        </Import-Package>
+                        <Embed-Dependency>
+                            *;scope=compile|runtime;type=!pom;
+                            artifactId=!connector-framework,!connector-framework-internal;
+                            groupId=!org.slf4j
+                        </Embed-Dependency>
+                        <Embed-Transitive>true</Embed-Transitive>
+                        <Embed-Directory>lib</Embed-Directory>
+                    </instructions>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
