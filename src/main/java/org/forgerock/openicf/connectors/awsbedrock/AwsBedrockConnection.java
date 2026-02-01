@@ -36,17 +36,11 @@ public class AwsBedrockConnection implements Closeable {
     private AwsBedrockClient createClient() {
         final String region = configuration.getRegion();
         final String accountId = configuration.getAccountId();
-        //if (configuration.isUseDefaultCredentialsProvider()) {
-        //    LOG.ok("Creating AwsBedrockClient with default credentials provider for region {0}", region);
-        //    return new AwsBedrockClient(region);
-        //} else {
-            final String accessKeyId = configuration.getAccessKeyId();
-            final String secretAccessKey = toPlainString(configuration.getSecretAccessKey());
+        final String accessKeyId = configuration.getAccessKeyId();
+        final String secretAccessKey = toPlainString(configuration.getSecretAccessKey());
 
-            LOG.ok("Creating AwsBedrockClient with explicit credentials for region {0}", region);
-            //return new AwsBedrockClient(region, accessKeyId, secretAccessKey);
-            return new AwsBedrockClient(region, accountId, accessKeyId, secretAccessKey);
-        //}
+        LOG.ok("Creating AwsBedrockClient with explicit credentials for region {0}", region);
+        return new AwsBedrockClient(region, accountId, accessKeyId, secretAccessKey);
     }
     /**
      * Builds an S3Client using the same credential strategy as AwsBedrockClient:
@@ -90,6 +84,10 @@ public class AwsBedrockConnection implements Closeable {
     /** Expose the shared S3 client for reading precomputed bindings. */
     public S3Client getS3Client() {
         return s3Client;
+    }
+
+    public AwsBedrockConfiguration getConfiguration() {
+        return configuration;
     }
 
     /**

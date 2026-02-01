@@ -54,7 +54,7 @@ public class AwsBedrockCrudService {
     // key -> list of bindings
     private volatile Map<String, List<AgentIdentityBinding>> bindingsByKey = new ConcurrentHashMap<>();
     private volatile Instant bindingsLoadedAt = Instant.EPOCH;
-    private static final long BINDINGS_CACHE_TTL_SECONDS = 300L; // 5 minutes
+    // 5 minutes
     private static final String WILDCARD_KEY = "WILDCARD";
 
     public AwsBedrockCrudService(AwsBedrockConnection connection) {
@@ -124,7 +124,6 @@ public class AwsBedrockCrudService {
 
         for (AgentSummary summary : summaries) {
             String agentId = summary.agentId();
-            System.out.println("Found agent " + agentId);
             // Fetch full agent to get guardrailConfiguration
             Agent agent;
             try {
@@ -138,7 +137,6 @@ public class AwsBedrockCrudService {
             if (guardrailConfig == null
                     || guardrailConfig.guardrailIdentifier() == null
                     || guardrailConfig.guardrailIdentifier().isEmpty()) {
-                System.out.println("No guardrail configuration for agent " + agentId);
                 // This agent has no guardrail attached; skip
                 continue;
             }
@@ -267,13 +265,8 @@ public class AwsBedrockCrudService {
         List<AgentSummary> summaries = client.listAgents();
 
         for (AgentSummary summary : summaries) {
-            Agent agent = client.getAgent(summary.agentId());
-            String agentVersion = agent.agentVersion() != null
-                    ? agent.agentVersion()
-                    : "DRAFT";
-
             List<AgentIdentityBinding> bindings =
-                    listIdentityBindingsForAgentAndAliases(client, agent, agentVersion);
+                    listIdentityBindingsForAgentAndAliases(client, summary.agentId());
 
             for (AgentIdentityBinding binding : bindings) {
                 ConnectorObject obj = toIdentityBindingConnectorObject(objectClass, binding);
@@ -413,21 +406,9 @@ public class AwsBedrockCrudService {
                 AwsBedrockUtils.fromIdentityBindingUid(uid.getUidValue());
 
         AwsBedrockClient client = client();
-        Agent agent;
-        try {
-            agent = client.getAgent(key.agentId());
-        } catch (BedrockAgentException e) {
-            LOG.warn(e, "Failed to retrieve agent {0} for identity binding UID {1}",
-                    key.agentId(), uid.getUidValue());
-            return null;
-        }
-
-        String agentVersion = agent.agentVersion() != null
-                ? agent.agentVersion()
-                : "DRAFT";
 
         List<AgentIdentityBinding> bindings =
-                listIdentityBindingsForAgentAndAliases(client, agent, agentVersion);
+                listIdentityBindingsForAgentAndAliases(client, key.agentId());
 
         for (AgentIdentityBinding binding : bindings) {
             if (binding.scope.equals(key.scope())
@@ -483,6 +464,38 @@ public class AwsBedrockCrudService {
             b.addAttribute(AttributeBuilder.build(ATTR_UPDATED_AT, agent.updatedAt().toString()));
         }
 
+        String agentArn = String.format("arn:aws:bedrock:%s:%s:agent/%s",
+                client().getRegion(),
+                client().getAccountId(),
+                agentId);
+        b.addAttribute(AttributeBuilder.build(ATTR_AGENT_ARN, agentArn));
+
+        // Add customerEncryptionKeyArn if present
+        if (agent.customerEncryptionKeyArn() != null && !agent.customerEncryptionKeyArn().isEmpty()) {
+            b.addAttribute(AttributeBuilder.build(
+                    ATTR_CUSTOMER_ENCRYPTION_KEY_ARN,
+                    agent.customerEncryptionKeyArn()));
+        }
+
+        // Add failureReasons if present
+        if (agent.failureReasons() != null && !agent.failureReasons().isEmpty()) {
+            b.addAttribute(AttributeBuilder.build(
+                    ATTR_FAILURE_REASONS,
+                    agent.failureReasons().toArray(new String[0])));
+        }
+
+        // Add recommendedActions if present
+        if (agent.recommendedActions() != null && !agent.recommendedActions().isEmpty()) {
+            b.addAttribute(AttributeBuilder.build(
+                    ATTR_RECOMMENDED_ACTIONS,
+                    agent.recommendedActions().toArray(new String[0])));
+        }
+
+        // Add preparedAt if present
+        if (agent.preparedAt() != null) {
+            b.addAttribute(AttributeBuilder.build(ATTR_PREPARED_AT, agent.preparedAt().toString()));
+        }
+
         // Guardrail summary (ID/version only for now)
         GuardrailConfiguration cfg = agent.guardrailConfiguration();
         if (cfg != null) {
@@ -531,8 +544,7 @@ public class AwsBedrockCrudService {
             List<AgentIdentityBinding> bindings =
                     listIdentityBindingsForAgentAndAliases(
                             client(),
-                            agent,
-                            agent.agentVersion() != null ? agent.agentVersion() : "DRAFT");
+                            agentId);
 
             Set<String> principals = new LinkedHashSet<>();
             for (AgentIdentityBinding binding : bindings) {
@@ -710,15 +722,6 @@ public class AwsBedrockCrudService {
                     }
                 }
 
-                // Parent action group signature (AMAZON.UserInput, AMAZON.CodeInterpreter, ANTHROPIC.Computer, etc.)
-                // TODO - Uncomment after upgrading the SDK
-                // if (detail.parentActionSignatureAsString() != null
-                //        && !detail.parentActionGroupSignatureAsString().isEmpty()) {
-                //    b.addAttribute(AttributeBuilder.build(
-                //            ATTR_ACTION_GROUP_PARENT_SIGNATURE,
-                //            detail.parentActionGroupSignatureAsString()));
-                //}
-
                 // Schema URI (when schema stored in S3)
                 APISchema apiSchema = detail.apiSchema();
                 if (apiSchema != null && apiSchema.s3() != null) {
@@ -857,12 +860,9 @@ public class AwsBedrockCrudService {
     }
 
     private List<AgentIdentityBinding> listIdentityBindingsForAgentAndAliases(AwsBedrockClient client,
-                                                                              Agent agent,
-                                                                              String agentVersion) {
+                                                                              String agentId) {
         Map<String, List<AgentIdentityBinding>> cache = getBindingsCache();
         List<AgentIdentityBinding> results = new ArrayList<>();
-
-        String agentId = agent.agentId();
 
         // 1. Agent-level bindings
         List<AgentIdentityBinding> direct = cache.get(agentKey(agentId));
@@ -989,7 +989,7 @@ public class AwsBedrockCrudService {
 
     private String extractAccountFromArn(String arn) {
         // arn:partition:service:region:account-id:...
-        if (arn == null) {
+        if (arn == null || arn.isEmpty()) {
             return null;
         }
         String[] parts = arn.split(":", 6);
@@ -1034,7 +1034,7 @@ public class AwsBedrockCrudService {
         AwsBedrockClient client = client();
         String accountId = client.getAccountId();
         String region = client.getRegion();
-        String bucket = "precomputed-agent-bindings"; // as per your design
+        String bucket = connection.getConfiguration().getS3BindingsBucket();; // as per your design
         String key = accountId + "/" + region + "/bindings.json";
 
         Map<String, List<AgentIdentityBinding>> map = new HashMap<>();
@@ -1131,11 +1131,12 @@ public class AwsBedrockCrudService {
 
     private Map<String, List<AgentIdentityBinding>> getBindingsCache() {
         Instant now = Instant.now();
+        long cacheTtl = connection.getConfiguration().getBindingsCacheTtlSeconds();
         if (bindingsByKey.isEmpty()
-                || bindingsLoadedAt.plusSeconds(BINDINGS_CACHE_TTL_SECONDS).isBefore(now)) {
+                || bindingsLoadedAt.plusSeconds(cacheTtl).isBefore(now)) {
             synchronized (this) {
                 if (bindingsByKey.isEmpty()
-                        || bindingsLoadedAt.plusSeconds(BINDINGS_CACHE_TTL_SECONDS).isBefore(now)) {
+                        || bindingsLoadedAt.plusSeconds(cacheTtl).isBefore(now)) {
                     LOG.ok("Refreshing precomputed agent bindings cache from S3");
                     bindingsByKey = loadBindingsFromS3();
                     bindingsLoadedAt = now;

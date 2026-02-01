@@ -127,6 +127,14 @@ public class AwsBedrockConnector implements Connector,
                         AttributeInfo.Flags.NOT_CREATABLE, AttributeInfo.Flags.NOT_UPDATEABLE)));
         agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_GUARDRAIL_ID, String.class));
         agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_GUARDRAIL_VERSION, String.class));
+        agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_AGENT_ARN, String.class));
+        agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_AGENT_NAME, String.class));
+        agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_CUSTOMER_ENCRYPTION_KEY_ARN, String.class));
+        agent.addAttributeInfo(AttributeInfoBuilder.build(
+                AwsBedrockConstants.ATTR_FAILURE_REASONS, String.class, EnumSet.of(AttributeInfo.Flags.MULTIVALUED)));
+        agent.addAttributeInfo(AttributeInfoBuilder.build(
+                AwsBedrockConstants.ATTR_RECOMMENDED_ACTIONS, String.class, EnumSet.of(AttributeInfo.Flags.MULTIVALUED)));
+        agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_PREPARED_AT, String.class));
         builder.defineObjectClass(agent.build());
 
         // -----------------------------------------------------------------

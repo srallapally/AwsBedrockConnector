@@ -52,6 +52,12 @@ public abstract class AwsBedrockConstants {
     public static final String ATTR_KNOWLEDGE_BASES = "knowledgeBases";
     public static final String ATTR_GUARDRAIL_ID = "guardrailId";
     public static final String ATTR_GUARDRAIL_VERSION = "guardrailVersion";
+    public static final String ATTR_AGENT_ARN = "agentArn";
+    public static final String ATTR_AGENT_NAME = "agentName";
+    public static final String ATTR_CUSTOMER_ENCRYPTION_KEY_ARN = "customerEncryptionKeyArn";
+    public static final String ATTR_FAILURE_REASONS = "failureReasons";
+    public static final String ATTR_RECOMMENDED_ACTIONS = "recommendedActions";
+    public static final String ATTR_PREPARED_AT = "preparedAt";
 
     // Knowledge base attributes
     // ---------------------------------------------------------------------
