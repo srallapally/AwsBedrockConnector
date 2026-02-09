@@ -30,6 +30,9 @@ import software.amazon.awssdk.services.iam.model.GetPolicyVersionRequest;
 import software.amazon.awssdk.services.iam.model.GetPolicyVersionResponse;
 
 
+import software.amazon.awssdk.http.SdkHttpClient;
+import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
+
 import java.util.List;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -77,19 +80,24 @@ public class AwsBedrockClient implements AutoCloseable {
     public AwsBedrockClient(String region,String accountId) {
         Region awsRegion = Region.of(region);
         DefaultCredentialsProvider provider = DefaultCredentialsProvider.create();
+        SdkHttpClient httpClient = UrlConnectionHttpClient.builder().build();
+
         this.agentClient = BedrockAgentClient.builder()
                 .region(awsRegion)
-                .credentialsProvider(DefaultCredentialsProvider.create())
+                .credentialsProvider(provider)
+                .httpClient(httpClient)
                 .build();
 
         this.bedrockClient = BedrockClient.builder()
                 .region(awsRegion)
-                .credentialsProvider(DefaultCredentialsProvider.create())
+                .credentialsProvider(provider)
+                .httpClient(httpClient)
                 .build();
 
         this.iamClient = IamClient.builder()
                 .region(awsRegion)
                 .credentialsProvider(provider)
+                .httpClient(httpClient)
                 .build();
 
         this.region = region;
@@ -108,20 +116,24 @@ public class AwsBedrockClient implements AutoCloseable {
         Region awsRegion = Region.of(region);
 
         StaticCredentialsProvider provider = StaticCredentialsProvider.create(credentials);
+        SdkHttpClient httpClient = UrlConnectionHttpClient.builder().build();
 
         this.agentClient = BedrockAgentClient.builder()
                 .region(awsRegion)
                 .credentialsProvider(provider)
+                .httpClient(httpClient)
                 .build();
 
         this.bedrockClient = BedrockClient.builder()
                 .region(awsRegion)
                 .credentialsProvider(provider)
+                .httpClient(httpClient)
                 .build();
 
         this.iamClient = IamClient.builder()
                 .region(awsRegion)
                 .credentialsProvider(provider)
+                .httpClient(httpClient)
                 .build();
 
         this.region = region;

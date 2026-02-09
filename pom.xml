@@ -10,8 +10,6 @@
     <version>1.5.20.29</version>
     <packaging>bundle</packaging>
 
-    <name>AWS Bedrock Connector</name>
-    <description>OpenICF connector for AWS Bedrock Agents</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -52,40 +50,115 @@
             <scope>provided</scope>
         </dependency>
 
+        <!--
+            SLF4J API: pinned as provided so it resolves to the single copy
+            the ICF/OSGi container already ships. This prevents the SDK's
+            transitive slf4j-api from landing on a different classloader.
+        -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>1.7.36</version>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- AWS SDK modules (versions come from BOM above) -->
         <!-- AWS IAM V2 SDK for scanning InvokeAgent IAM policies -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>iam</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!--
+            url-connection-client: primary vector for the LinkageError.
+            UrlConnectionHttpClient.<clinit> calls LoggerFactory.getLogger()
+            which triggers StaticLoggerBinder resolution across classloaders.
+        -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>bedrock</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>bedrockagent</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>auth</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>regions</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <!-- Core + JSON protocol explicitly included to avoid CNF issues -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>sdk-core</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>aws-json-protocol</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <!-- Jackson; often pulled transitively, but make it explicit for clarity -->
         <dependency>
@@ -177,8 +250,8 @@
                         </Import-Package>
                         <Embed-Dependency>
                             *;scope=compile|runtime;type=!pom;
-                            artifactId=!connector-framework,!connector-framework-internal;
-                            groupId=!org.slf4j
+                            artifactId=!connector-framework,!connector-framework-internal,!netty-nio-client,!apache-client;
+                            groupId=!org.slf4j,!io.netty,!org.apache.httpcomponents,!commons-logging,!commons-codec
                         </Embed-Dependency>
                         <Embed-Transitive>true</Embed-Transitive>
                         <Embed-Directory>lib</Embed-Directory>

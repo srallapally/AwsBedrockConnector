@@ -36,8 +36,8 @@ public class AwsBedrockConnector implements Connector,
     private static final Log LOG = Log.getLog(AwsBedrockConnector.class);
 
     // Custom object classes
-    public static final ObjectClass OC_AGENT =
-            new ObjectClass(AwsBedrockConstants.OC_AGENT);
+    public static final ObjectClass OC_ACCOUNT =
+            new ObjectClass(ObjectClass.ACCOUNT_NAME);
     public static final ObjectClass OC_GUARDRAIL =
             new ObjectClass(AwsBedrockConstants.OC_GUARDRAIL);
     public static final ObjectClass OC_TOOL =
@@ -106,7 +106,8 @@ public class AwsBedrockConnector implements Connector,
         // agent object class
         // -----------------------------------------------------------------
         ObjectClassInfoBuilder agent = new ObjectClassInfoBuilder();
-        agent.setType(AwsBedrockConstants.OC_AGENT);
+        agent.setType(ObjectClass.ACCOUNT_NAME);
+        //agent.setType(AwsBedrockConstants.OC_AGENT);
         agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_PLATFORM, String.class));
         agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_AGENT_ID, String.class));
         agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_VERSION, String.class));
@@ -273,7 +274,7 @@ public class AwsBedrockConnector implements Connector,
 
         PagingResultsHandler pagingHandler = new PagingResultsHandler(handler, offset, pageSize);
 
-        if (objectClass.is(OC_AGENT.getObjectClassValue())) {
+        if (objectClass.is(OC_ACCOUNT.getObjectClassValue())) {
             crudService.searchAgents(objectClass, query, pagingHandler, options);
         } else if (objectClass.is(OC_GUARDRAIL.getObjectClassValue())) {
             crudService.searchGuardrails(objectClass, query, pagingHandler, options);
@@ -301,7 +302,7 @@ public class AwsBedrockConnector implements Connector,
 
         ConnectorObject co = null;
 
-        if (objectClass.is(OC_AGENT.getObjectClassValue())) {
+        if (objectClass.is(OC_ACCOUNT.getObjectClassValue())) {
             co = crudService.getAgent(objectClass, uid, options);
         } else if (objectClass.is(OC_GUARDRAIL.getObjectClassValue())) {
             co = crudService.getGuardrail(objectClass, uid, options);

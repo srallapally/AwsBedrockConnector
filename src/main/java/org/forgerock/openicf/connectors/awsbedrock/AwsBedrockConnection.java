@@ -9,6 +9,7 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -44,8 +45,8 @@ public class AwsBedrockConnection implements Closeable {
     }
     /**
      * Builds an S3Client using the same credential strategy as AwsBedrockClient:
-     * - If useDefaultCredentialsProvider == true → DefaultCredentialsProvider chain
-     * - Else → StaticCredentialsProvider(accessKeyId, secretAccessKey)
+     * - If useDefaultCredentialsProvider == true â†’ DefaultCredentialsProvider chain
+     * - Else â†’ StaticCredentialsProvider(accessKeyId, secretAccessKey)
      */
     private S3Client createS3Client(AwsBedrockConfiguration configuration) {
         AwsCredentialsProvider credentialsProvider;
@@ -63,6 +64,7 @@ public class AwsBedrockConnection implements Closeable {
         return S3Client.builder()
                 .region(Region.of(configuration.getRegion()))
                 .credentialsProvider(credentialsProvider)
+                .httpClient(UrlConnectionHttpClient.builder().build())
                 .build();
     }
     private String toPlainString(GuardedString guarded) {
