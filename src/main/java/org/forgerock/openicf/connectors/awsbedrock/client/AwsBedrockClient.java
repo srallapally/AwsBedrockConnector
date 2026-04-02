@@ -1,3 +1,4 @@
+// src/main/java/org/forgerock/openicf/connectors/awsbedrock/client/AwsBedrockClient.java
 package org.forgerock.openicf.connectors.awsbedrock.client;
 
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -281,6 +282,46 @@ public class AwsBedrockClient implements AutoCloseable {
         ListAgentAliasesResponse response = agentClient.listAgentAliases(request);
         return response.agentAliasSummaries();
     }
+
+    // OPENICF-422: Get full details for a single agent alias (needed for alias-level identity model).
+    /**
+     * Fetches full details for a specific agent alias.
+     *
+     * @param agentId The Bedrock agent ID.
+     * @param aliasId The alias ID.
+     * @return AgentAlias with complete details.
+     * @throws BedrockAgentException if the alias is not found or API call fails.
+     */
+    public AgentAlias getAgentAlias(String agentId, String aliasId) {
+        GetAgentAliasRequest request = GetAgentAliasRequest.builder()
+                .agentId(agentId)
+                .agentAliasId(aliasId)
+                .build();
+
+        GetAgentAliasResponse response = agentClient.getAgentAlias(request);
+        return response.agentAlias();
+    }
+
+    // OPENICF-422: List collaborators for multi-agent collaboration (connectedAgents attribute).
+    /**
+     * Lists the collaborator agents associated with a specific agent.
+     *
+     * @param agentId      The unique identifier of the agent.
+     * @param agentVersion The version of the agent (e.g., "DRAFT").
+     * @return List of AgentCollaboratorSummary objects.
+     * @throws BedrockAgentException if the API call fails.
+     */
+    public List<AgentCollaboratorSummary> listAgentCollaborators(String agentId, String agentVersion) {
+        ListAgentCollaboratorsRequest request = ListAgentCollaboratorsRequest.builder()
+                .agentId(agentId)
+                .agentVersion(agentVersion)
+                .maxResults(100) // TODO: add pagination if you expect >100 collaborators
+                .build();
+
+        ListAgentCollaboratorsResponse response = agentClient.listAgentCollaborators(request);
+        return response.agentCollaboratorSummaries();
+    }
+
     /**
      * Lists the action groups (tools) associated with a specific agent.
      *

@@ -1,3 +1,4 @@
+// src/main/java/org/forgerock/openicf/connectors/awsbedrock/operations/AwsBedrockCrudService.java
 package org.forgerock.openicf.connectors.awsbedrock.operations;
 
 import org.forgerock.openicf.connectors.awsbedrock.AwsBedrockConnection;
@@ -77,6 +78,9 @@ public class AwsBedrockCrudService {
     private static String aliasKey(String agentId, String aliasId) {
         return "ALIAS#" + agentId + "/" + aliasId;
     }
+
+    // OPENICF-424: Rewritten to emit one ConnectorObject per alias (alias-level identity model).
+    // Agents with zero aliases emit a single bare-agent ConnectorObject.
     /**
      * Search for agents and stream them to the handler.
      * Current implementation ignores complex filters and returns all agents.
@@ -91,19 +95,44 @@ public class AwsBedrockCrudService {
 
         for (AgentSummary summary : summaries) {
             Agent agent = client.getAgent(summary.agentId());
-            ConnectorObject obj = toAgentConnectorObject(objectClass, agent);
-            if (obj == null) {
-                continue;
+
+            // OPENICF-424: List aliases for this agent
+            List<AgentAliasSummary> aliases;
+            try {
+                aliases = client.listAgentAliases(agent.agentId());
+            } catch (BedrockAgentException e) {
+                LOG.warn(e, "Failed to list aliases for agent {0}", agent.agentId());
+                aliases = Collections.emptyList();
             }
 
-            // If the filter is a simple Uid filter, apply it here; otherwise, let IGA layer post-filter.
-            if (query != null && !query.accept(obj)) {
-                continue;
-            }
-
-            if (!handler.handle(obj)) {
-                LOG.ok("Handler requested to stop processing agents.");
-                break;
+            if (aliases != null && !aliases.isEmpty()) {
+                // OPENICF-424: Emit one ConnectorObject per alias
+                for (AgentAliasSummary alias : aliases) {
+                    ConnectorObject obj = toAgentAliasConnectorObject(objectClass, agent, alias);
+                    if (obj == null) {
+                        continue;
+                    }
+                    if (query != null && !query.accept(obj)) {
+                        continue;
+                    }
+                    if (!handler.handle(obj)) {
+                        LOG.ok("Handler requested to stop processing agents.");
+                        return;
+                    }
+                }
+            } else {
+                // OPENICF-424: Bare agent (no aliases) — emit single ConnectorObject
+                ConnectorObject obj = toBareAgentConnectorObject(objectClass, agent);
+                if (obj == null) {
+                    continue;
+                }
+                if (query != null && !query.accept(obj)) {
+                    continue;
+                }
+                if (!handler.handle(obj)) {
+                    LOG.ok("Handler requested to stop processing agents.");
+                    break;
+                }
             }
         }
     }
@@ -290,19 +319,52 @@ public class AwsBedrockCrudService {
     // Get helpers
     // =================================================================
 
+    // OPENICF-424: Rewritten to handle both alias UIDs (agentId:aliasId) and bare agent UIDs.
     public ConnectorObject getAgent(ObjectClass objectClass,
                                     Uid uid,
                                     OperationOptions options) {
         AwsBedrockClient client = client();
-        AwsBedrockUtils.AgentKey key = fromAgentUid(uid.getUidValue());
-        Agent agent;
-        try {
-            agent = client.getAgent(key.agentId());
-        } catch (BedrockAgentException e) {
-            LOG.info(e, "Agent not found for UID {0}", uid.getUidValue());
-            return null;
+        String uidValue = uid.getUidValue();
+
+        if (isAliasUid(uidValue)) {
+            // OPENICF-424: Alias-level GET
+            AwsBedrockUtils.AgentAliasKey key = fromAgentAliasUid(uidValue);
+            Agent agent;
+            try {
+                agent = client.getAgent(key.agentId());
+            } catch (BedrockAgentException e) {
+                LOG.info(e, "Agent not found for alias UID {0}", uidValue);
+                return null;
+            }
+            AgentAlias alias;
+            try {
+                alias = client.getAgentAlias(key.agentId(), key.aliasId());
+            } catch (BedrockAgentException e) {
+                LOG.info(e, "Alias not found for UID {0}", uidValue);
+                return null;
+            }
+            // Build a summary from the full alias for the mapping method
+            AgentAliasSummary summary = AgentAliasSummary.builder()
+                    .agentAliasId(alias.agentAliasId())
+                    .agentAliasName(alias.agentAliasName())
+                    .agentAliasStatus(alias.agentAliasStatus())
+                    .createdAt(alias.createdAt())
+                    .updatedAt(alias.updatedAt())
+                    .description(alias.description())
+                    .build();
+            return toAgentAliasConnectorObject(objectClass, agent, summary);
+        } else {
+            // Bare agent GET (no alias)
+            AwsBedrockUtils.AgentKey key = fromAgentUid(uidValue);
+            Agent agent;
+            try {
+                agent = client.getAgent(key.agentId());
+            } catch (BedrockAgentException e) {
+                LOG.info(e, "Agent not found for UID {0}", uidValue);
+                return null;
+            }
+            return toBareAgentConnectorObject(objectClass, agent);
         }
-        return toAgentConnectorObject(objectClass, agent);
     }
 
     public ConnectorObject getGuardrail(ObjectClass objectClass,
@@ -426,22 +488,14 @@ public class AwsBedrockCrudService {
     // Mapping helpers
     // =================================================================
 
-    private ConnectorObject toAgentConnectorObject(ObjectClass objectClass, Agent agent) {
-        if (agent == null) {
-            return null;
-        }
-
-        ConnectorObjectBuilder b = new ConnectorObjectBuilder();
-        b.setObjectClass(objectClass);
-
+    // OPENICF-424: Common agent attribute mapping shared by both bare-agent and alias paths.
+    // Sets all agent-level attributes on the builder. Does NOT set UID, NAME, or alias attributes.
+    private void buildCommonAgentAttributes(ConnectorObjectBuilder b, Agent agent) {
         String agentId = agent.agentId();
-        String uidValue = toAgentUid(agentId);
-
-        b.setUid(new Uid(uidValue));
-        b.setName(new Name(agent.agentName()));
 
         b.addAttribute(AttributeBuilder.build(ATTR_PLATFORM, AwsBedrockConstants.CONNECTOR_NAME));
         b.addAttribute(AttributeBuilder.build(ATTR_AGENT_ID, agentId));
+        b.addAttribute(AttributeBuilder.build(ATTR_AGENT_NAME, agent.agentName()));
         b.addAttribute(AttributeBuilder.build(ATTR_VERSION, agent.agentVersion()));
         if (agent.agentStatus() != null) {
             b.addAttribute(AttributeBuilder.build(ATTR_STATUS, agent.agentStatusAsString()));
@@ -469,6 +523,9 @@ public class AwsBedrockCrudService {
                 client().getAccountId(),
                 agentId);
         b.addAttribute(AttributeBuilder.build(ATTR_AGENT_ARN, agentArn));
+
+        // OPENICF-424: Region stored per-object
+        b.addAttribute(AttributeBuilder.build(ATTR_REGION, client().getRegion()));
 
         // Add customerEncryptionKeyArn if present
         if (agent.customerEncryptionKeyArn() != null && !agent.customerEncryptionKeyArn().isEmpty()) {
@@ -508,11 +565,11 @@ public class AwsBedrockCrudService {
         }
 
         // Tools (Action Group IDs only; details are exposed via agentTool object class)
+        String agentVersion = agent.agentVersion() != null ? agent.agentVersion() : "DRAFT";
         List<String> toolIds = new ArrayList<>();
         try {
             List<ActionGroupSummary> groups =
-                    client().listAgentActionGroups(agentId,
-                            agent.agentVersion() != null ? agent.agentVersion() : "DRAFT");
+                    client().listAgentActionGroups(agentId, agentVersion);
             for (ActionGroupSummary g : groups) {
                 toolIds.add(g.actionGroupId());
             }
@@ -527,8 +584,7 @@ public class AwsBedrockCrudService {
         List<String> kbIds = new ArrayList<>();
         try {
             List<AgentKnowledgeBaseSummary> kbs =
-                    client().listAgentKnowledgeBases(agentId,
-                            agent.agentVersion() != null ? agent.agentVersion() : "DRAFT");
+                    client().listAgentKnowledgeBases(agentId, agentVersion);
             for (AgentKnowledgeBaseSummary kb : kbs) {
                 kbIds.add(kb.knowledgeBaseId());
             }
@@ -538,8 +594,24 @@ public class AwsBedrockCrudService {
         if (!kbIds.isEmpty()) {
             b.addAttribute(AttributeBuilder.build(ATTR_KNOWLEDGE_BASES, kbIds));
         }
-        long start = System.currentTimeMillis();
+
+        // OPENICF-424: agentCollaboration
+        if (agent.agentCollaboration() != null) {
+            b.addAttribute(AttributeBuilder.build(
+                    ATTR_AGENT_COLLABORATION,
+                    agent.agentCollaborationAsString()));
+        }
+
+        // OPENICF-424: connectedAgents (collaborator agent IDs)
+        List<String> collaboratorIds = getConnectedAgentIds(agentId, agentVersion);
+        if (!collaboratorIds.isEmpty()) {
+            b.addAttribute(AttributeBuilder.build(
+                    ATTR_CONNECTED_AGENTS,
+                    collaboratorIds));
+        }
+
         // Virtual principals (agentPrincipals) derived from identity bindings.
+        long start = System.currentTimeMillis();
         try {
             List<AgentIdentityBinding> bindings =
                     listIdentityBindingsForAgentAndAliases(
@@ -565,8 +637,81 @@ public class AwsBedrockCrudService {
         }
         long elapsed = System.currentTimeMillis() - start;
         LOG.info("Computed identity bindings for agent {0} in {1} ms", agentId, elapsed);
+    }
+
+    // OPENICF-424: Renamed from toAgentConnectorObject. Bare agent (no alias) path.
+    private ConnectorObject toBareAgentConnectorObject(ObjectClass objectClass, Agent agent) {
+        if (agent == null) {
+            return null;
+        }
+
+        ConnectorObjectBuilder b = new ConnectorObjectBuilder();
+        b.setObjectClass(objectClass);
+
+        String agentId = agent.agentId();
+        b.setUid(new Uid(toAgentUid(agentId)));
+        b.setName(new Name(agent.agentName()));
+
+        buildCommonAgentAttributes(b, agent);
+
         return b.build();
     }
+
+    // OPENICF-424: New method. One ConnectorObject per agent alias.
+    private ConnectorObject toAgentAliasConnectorObject(ObjectClass objectClass,
+                                                        Agent agent,
+                                                        AgentAliasSummary alias) {
+        if (agent == null || alias == null || alias.agentAliasId() == null) {
+            return null;
+        }
+
+        ConnectorObjectBuilder b = new ConnectorObjectBuilder();
+        b.setObjectClass(objectClass);
+
+        String agentId = agent.agentId();
+        String aliasId = alias.agentAliasId();
+
+        // OPENICF-424: UID = agentId:aliasId
+        b.setUid(new Uid(toAgentAliasUid(agentId, aliasId)));
+        // OPENICF-424: __NAME__ = agentName / aliasName
+        String aliasName = alias.agentAliasName() != null ? alias.agentAliasName() : aliasId;
+        b.setName(new Name(agent.agentName() + " / " + aliasName));
+
+        buildCommonAgentAttributes(b, agent);
+
+        // OPENICF-424: Alias-specific attributes
+        b.addAttribute(AttributeBuilder.build(ATTR_ALIAS_ID, aliasId));
+        b.addAttribute(AttributeBuilder.build(ATTR_ALIAS_NAME, aliasName));
+        if (alias.agentAliasStatus() != null) {
+            b.addAttribute(AttributeBuilder.build(
+                    ATTR_ALIAS_STATUS,
+                    alias.agentAliasStatusAsString()));
+        }
+
+        return b.build();
+    }
+
+    // OPENICF-424: Helper to fetch collaborator agent IDs for connectedAgents attribute.
+    private List<String> getConnectedAgentIds(String agentId, String agentVersion) {
+        List<String> ids = new ArrayList<>();
+        try {
+            List<AgentCollaboratorSummary> collaborators =
+                    client().listAgentCollaborators(agentId, agentVersion);
+            for (AgentCollaboratorSummary c : collaborators) {
+                if (c.agentDescriptor() != null
+                        && c.agentDescriptor().aliasArn() != null) {
+                    ids.add(c.agentDescriptor().aliasArn());
+                }
+            }
+        } catch (BedrockAgentException e) {
+            // Multi-agent collaboration may not be enabled; fail soft
+            LOG.ok("No collaborators found for agent {0}: {1}", agentId, e.getMessage());
+        } catch (Exception e) {
+            LOG.warn(e, "Failed to list collaborators for agent {0}", agentId);
+        }
+        return ids;
+    }
+
     private ConnectorObject toGuardrailConnectorObject(ObjectClass objectClass,
                                                        Agent agent,
                                                        GuardrailConfiguration guardrailConfig,

@@ -136,6 +136,16 @@ public class AwsBedrockConnector implements Connector,
         agent.addAttributeInfo(AttributeInfoBuilder.build(
                 AwsBedrockConstants.ATTR_RECOMMENDED_ACTIONS, String.class, EnumSet.of(AttributeInfo.Flags.MULTIVALUED)));
         agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_PREPARED_AT, String.class));
+        // OPENICF-423: Alias-level identity model attributes
+        agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_ALIAS_ID, String.class));
+        agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_ALIAS_NAME, String.class));
+        agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_ALIAS_STATUS, String.class));
+        // OPENICF-423: Region stored per-object for multi-region visibility
+        agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_REGION, String.class));
+        // OPENICF-423: Multi-agent collaboration
+        agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_AGENT_COLLABORATION, String.class));
+        agent.addAttributeInfo(AttributeInfoBuilder.build(
+                AwsBedrockConstants.ATTR_CONNECTED_AGENTS, String.class, EnumSet.of(AttributeInfo.Flags.MULTIVALUED)));
         builder.defineObjectClass(agent.build());
 
         // -----------------------------------------------------------------

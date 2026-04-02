@@ -1,10 +1,10 @@
+<!-- pom.xml -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
                              https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <!-- Adjust these if you want different coordinates -->
     <groupId>org.forgerock.openicf.connectors</groupId>
     <artifactId>awsbedrock-connector</artifactId>
     <version>1.5.20.29</version>
@@ -19,6 +19,8 @@
         <!-- Align all AWS SDK v2 modules via BOM -->
         <aws.sdk.version>2.39.5</aws.sdk.version>
         <jackson.version>2.16.1</jackson.version>
+        <!-- Framework -->
+        <openicf.framework.version>1.5.20.33</openicf.framework.version>
         <!-- Felix bundle plugin version -->
         <maven.bundle.plugin.version>5.1.9</maven.bundle.plugin.version>
     </properties>
@@ -36,24 +38,24 @@
     </dependencyManagement>
 
     <dependencies>
-        <!-- OpenICF framework: provided by Ping/ForgeRock runtime -->
+        <!-- OpenICF framework — provided by the runtime (RCS / IDM) -->
         <dependency>
             <groupId>org.forgerock.openicf.framework</groupId>
             <artifactId>connector-framework</artifactId>
-            <version>1.5.20.29</version>
+            <version>${openicf.framework.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.forgerock.openicf.framework</groupId>
             <artifactId>connector-framework-internal</artifactId>
-            <version>1.5.20.29</version>
+            <version>${openicf.framework.version}</version>
             <scope>provided</scope>
         </dependency>
 
         <!--
-            SLF4J API: pinned as provided so it resolves to the single copy
-            the ICF/OSGi container already ships. This prevents the SDK's
-            transitive slf4j-api from landing on a different classloader.
+            SLF4J API: provided by the ICF/OSGi container.
+            Pinned here to prevent the SDK's transitive slf4j-api
+            from landing on a different classloader.
         -->
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -62,40 +64,41 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- AWS SDK modules (versions come from BOM above) -->
-        <!-- AWS IAM V2 SDK for scanning InvokeAgent IAM policies -->
+        <!--
+            AWS SDK modules (versions come from BOM above).
+            Exclude netty-nio-client and apache-client from service modules
+            that pull them as default HTTP transports — we use
+            url-connection-client instead.
+        -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>iam</artifactId>
             <exclusions>
                 <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-impl</artifactId>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>apache-client</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
-        <!--
-            url-connection-client: primary vector for the LinkageError.
-            UrlConnectionHttpClient.<clinit> calls LoggerFactory.getLogger()
-            which triggers StaticLoggerBinder resolution across classloaders.
-        -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>url-connection-client</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-impl</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>bedrock</artifactId>
             <exclusions>
                 <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-impl</artifactId>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>apache-client</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -104,85 +107,183 @@
             <artifactId>bedrockagent</artifactId>
             <exclusions>
                 <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-impl</artifactId>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>apache-client</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>auth</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-impl</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>regions</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-impl</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
-        <!-- Core + JSON protocol explicitly included to avoid CNF issues -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>sdk-core</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-impl</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>aws-json-protocol</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-impl</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
             <exclusions>
                 <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-impl</artifactId>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>apache-client</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
-        <!-- Jackson; often pulled transitively, but make it explicit for clarity -->
+
+        <!--
+            AWS SDK internals: formerly transitive, now declared explicitly
+            so Embed-Transitive=false can find them. Versions from BOM.
+        -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>aws-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>aws-query-protocol</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>aws-xml-protocol</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>protocol-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>http-auth</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>http-auth-aws</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>http-auth-spi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>http-auth-aws-eventstream</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>http-client-spi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>identity-spi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>annotations</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>utils</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>utils-lite</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>metrics-spi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>json-utils</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>endpoints-spi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>profiles</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>checksums</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>checksums-spi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>retries</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>retries-spi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>arns</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>crt-core</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>third-party-jackson-core</artifactId>
+        </dependency>
+        <!-- Non-AWS transitive deps -->
+        <dependency>
+            <groupId>software.amazon.eventstream</groupId>
+            <artifactId>eventstream</artifactId>
+            <version>1.0.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.reactivestreams</groupId>
+            <artifactId>reactive-streams</artifactId>
+            <version>1.0.4</version>
+        </dependency>
+
+        <!-- Jackson: embedded in the bundle -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-core</artifactId>
             <version>${jackson.version}</version>
-            <scope>provided</scope>
+            <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>
-            <scope>provided</scope>
+            <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-annotations</artifactId>
             <version>${jackson.version}</version>
-            <scope>provided</scope>
+            <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-cbor</artifactId>
-            <version>2.16.1</version>
+            <version>${jackson.version}</version>
+            <scope>compile</scope>
         </dependency>
 
         <!-- Add test deps here if you have them (JUnit, Mockito, etc.) -->
@@ -240,20 +341,49 @@
                         </Export-Package>
 
                         <Import-Package>
-                            org.identityconnectors.common*;version="[1.5,2)",
-                            org.identityconnectors.framework.common*;version="[1.5,2)",
-                            org.identityconnectors.framework.spi*;version="[1.5,2)",
-                            org.slf4j.*,
-                            software.amazon.awssdk.*,
-                            com.fasterxml.jackson.*,
+                            org.identityconnectors.*;version="${openicf.framework.version}",
                             *
                         </Import-Package>
+
+                        <!--
+                            Explicit allowlist — only these artifacts are embedded.
+                            Embed-Transitive=false ensures nothing else sneaks in.
+
+                            AWS service modules (9):
+                              iam, bedrock, bedrockagent, s3, auth, regions,
+                              sdk-core, aws-json-protocol, url-connection-client
+
+                            AWS SDK internals (24):
+                              aws-core, aws-query-protocol, aws-xml-protocol,
+                              protocol-core, http-auth, http-auth-aws, http-auth-spi,
+                              http-auth-aws-eventstream, http-client-spi, identity-spi,
+                              annotations, utils, utils-lite, metrics-spi, json-utils,
+                              endpoints-spi, profiles, checksums, checksums-spi,
+                              retries, retries-spi, arns, crt-core,
+                              third-party-jackson-core
+
+                            Non-AWS transitive (2):
+                              eventstream, reactive-streams
+
+                            Jackson (4):
+                              jackson-core, jackson-databind, jackson-annotations,
+                              jackson-dataformat-cbor
+                        -->
                         <Embed-Dependency>
-                            *;scope=compile|runtime;type=!pom;
-                            artifactId=!connector-framework,!connector-framework-internal,!netty-nio-client,!apache-client;
-                            groupId=!org.slf4j,!io.netty,!org.apache.httpcomponents,!commons-logging,!commons-codec
+                            iam,bedrock,bedrockagent,s3,auth,regions,
+                            sdk-core,aws-json-protocol,url-connection-client,
+                            aws-core,aws-query-protocol,aws-xml-protocol,
+                            protocol-core,http-auth,http-auth-aws,http-auth-spi,
+                            http-auth-aws-eventstream,http-client-spi,identity-spi,
+                            annotations,utils,utils-lite,metrics-spi,json-utils,
+                            endpoints-spi,profiles,checksums,checksums-spi,
+                            retries,retries-spi,arns,crt-core,
+                            third-party-jackson-core,
+                            eventstream,reactive-streams,
+                            jackson-core,jackson-databind,jackson-annotations,
+                            jackson-dataformat-cbor
                         </Embed-Dependency>
-                        <Embed-Transitive>true</Embed-Transitive>
+                        <Embed-Transitive>false</Embed-Transitive>
                         <Embed-Directory>lib</Embed-Directory>
                     </instructions>
                 </configuration>

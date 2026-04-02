@@ -1,3 +1,4 @@
+// src/main/java/org/forgerock/openicf/connectors/awsbedrock/utils/AwsBedrockUtils.java
 package org.forgerock.openicf.connectors.awsbedrock.utils;
 
 import static org.forgerock.openicf.connectors.awsbedrock.utils.AwsBedrockConstants.UID_SEPARATOR;
@@ -15,6 +16,9 @@ public final class AwsBedrockUtils {
      * Simple key for an agent (Bedrock agentId is globally unique).
      */
     public record AgentKey(String agentId) { }
+
+    // OPENICF-421: Composite key for an agent alias (agent + alias pair).
+    public record AgentAliasKey(String agentId, String aliasId) { }
 
     /**
      * Composite key for a guardrail attached to an agent.
@@ -60,6 +64,32 @@ public final class AwsBedrockUtils {
      */
     public static AgentKey fromAgentUid(String uid) {
         return new AgentKey(uid);
+    }
+
+    // OPENICF-421: Agent Alias UID helpers
+    // ---------------------------------------------------------------------
+    // UID format:   agentId:aliasId  (both segments are alphanumeric, safe with ":")
+    // Bare agents (no alias) use plain agentId with no separator.
+    // ---------------------------------------------------------------------
+
+    public static String toAgentAliasUid(String agentId, String aliasId) {
+        return agentId + UID_SEPARATOR + aliasId;
+    }
+
+    public static AgentAliasKey fromAgentAliasUid(String uid) {
+        String[] parts = uid.split(UID_SEPARATOR, 2);
+        if (parts.length != 2) {
+            throw new IllegalArgumentException("Invalid agent alias UID format: " + uid);
+        }
+        return new AgentAliasKey(parts[0], parts[1]);
+    }
+
+    /**
+     * Returns true if the UID contains a separator (alias UID),
+     * false if it's a bare agent ID.
+     */
+    public static boolean isAliasUid(String uid) {
+        return uid != null && uid.contains(UID_SEPARATOR);
     }
 
     // ---------------------------------------------------------------------
@@ -128,7 +158,10 @@ public final class AwsBedrockUtils {
     }
 
     public static IdentityBindingKey fromIdentityBindingUid(String uid) {
-        String[] parts = uid.split(UID_SEPARATOR, -1);
+        // OPENICF-421: Split with limit 3 because principalArn (third segment)
+        // contains colons, e.g. "agentId:AGENT:arn:aws:iam::123456789012:role/MyRole"
+        //   → ["agentId", "AGENT", "arn:aws:iam::123456789012:role/MyRole"]
+        String[] parts = uid.split(UID_SEPARATOR, 3);
         if (parts.length != 3) {
             throw new IllegalArgumentException("Invalid identity binding UID format: " + uid);
         }

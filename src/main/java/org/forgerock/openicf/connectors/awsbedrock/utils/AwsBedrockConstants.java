@@ -58,7 +58,11 @@ public abstract class AwsBedrockConstants {
     public static final String ATTR_FAILURE_REASONS = "failureReasons";
     public static final String ATTR_RECOMMENDED_ACTIONS = "recommendedActions";
     public static final String ATTR_PREPARED_AT = "preparedAt";
-
+    // OPENICF-420
+    // Alias attributes
+    public static final String ATTR_ALIAS_ID = "aliasId";
+    public static final String ATTR_ALIAS_NAME = "aliasName";
+    public static final String ATTR_ALIAS_STATUS = "agentAliasStatus";
     // Knowledge base attributes
     // ---------------------------------------------------------------------
     public static final String ATTR_KNOWLEDGE_BASE_ID = "knowledgeBaseId";
@@ -97,7 +101,13 @@ public abstract class AwsBedrockConstants {
 
     // NEW: virtual, computed principals on the agent
     public static final String ATTR_AGENT_PRINCIPALS = "agentPrincipals";
+    //OPENICF-420
+    // Region (stored per-object for multi-region visibility)
+    public static final String ATTR_REGION = "region";
 
+    // Multi-agent collaboration
+    public static final String ATTR_AGENT_COLLABORATION = "agentCollaboration";
+    public static final String ATTR_CONNECTED_AGENTS = "connectedAgents";
     private AwsBedrockConstants() {
         // prevent instantiation
     }
