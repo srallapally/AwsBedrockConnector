@@ -1,3 +1,4 @@
+// src/main/java/org/forgerock/openicf/connectors/awsbedrock/AwsBedrockConfiguration.java
 package org.forgerock.openicf.connectors.awsbedrock;
 
 import org.forgerock.openicf.connectors.awsbedrock.utils.AwsBedrockConstants;
@@ -42,8 +43,11 @@ public class AwsBedrockConfiguration extends AbstractConfiguration {
      */
     private GuardedString secretAccessKey;
 
-    private String s3BindingsBucket = "precomputed-agent-bindings";
-    private Long bindingsCacheTtlSeconds = 300L; // 5 minutes
+    // OPENICF-431: Single bucket for all bedrock-core-tools-inventory artifacts.
+    // Key paths are constants in AwsBedrockConstants (AGENT_BINDINGS_S3_KEY,
+    // TOOL_CREDENTIALS_S3_KEY).
+    private String inventoryBucket = "bedrock-core-inventory";
+    private Long bindingsCacheTtlSeconds = 300L; // 5 minutes — applies to all S3 inventory caches
 
     // ---------------------------------------------------------------------
     // Configuration properties
@@ -120,12 +124,19 @@ public class AwsBedrockConfiguration extends AbstractConfiguration {
         this.secretAccessKey = secretAccessKey;
     }
 
-    public String getS3BindingsBucket() {
-        return s3BindingsBucket;
+    // OPENICF-431
+    @ConfigurationProperty(
+            order = 6,
+            displayMessageKey = "awsbedrock.inventoryBucket.display",
+            helpMessageKey = "awsbedrock.inventoryBucket.help",
+            required = true
+    )
+    public String getInventoryBucket() {
+        return inventoryBucket;
     }
 
-    public void setS3BindingsBucket(String s3BindingsBucket) {
-        this.s3BindingsBucket = s3BindingsBucket;
+    public void setInventoryBucket(String inventoryBucket) {
+        this.inventoryBucket = inventoryBucket;
     }
 
     public Long getBindingsCacheTtlSeconds() {
@@ -136,13 +147,6 @@ public class AwsBedrockConfiguration extends AbstractConfiguration {
         this.bindingsCacheTtlSeconds = bindingsCacheTtlSeconds;
     }
 
-    /**
-     * Default key where the Lambda writes bindings:
-     *   <accountId>/<region>/bindings.json
-     */
-    public String computeBindingsKey() {
-        return String.format("%s/%s/bindings.json", getAccountId(), getRegion());
-    }
     // ---------------------------------------------------------------------
     // Validation
     // ---------------------------------------------------------------------
@@ -154,6 +158,9 @@ public class AwsBedrockConfiguration extends AbstractConfiguration {
         }
         if (StringUtil.isBlank(accountId)) {
             throw new IllegalArgumentException("AWS accountId must be specified for AWS Bedrock connector.");
+        }
+        if (StringUtil.isBlank(inventoryBucket)) {
+            throw new IllegalArgumentException("inventoryBucket must be specified for AWS Bedrock connector.");
         }
         if (!useDefaultCredentialsProvider) {
             if (StringUtil.isBlank(accessKeyId)) {

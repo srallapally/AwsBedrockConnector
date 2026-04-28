@@ -1,3 +1,4 @@
+// src/main/java/org/forgerock/openicf/connectors/awsbedrock/utils/AwsBedrockConstants.java
 package org.forgerock.openicf.connectors.awsbedrock.utils;
 
 /**
@@ -29,6 +30,17 @@ public abstract class AwsBedrockConstants {
     public static final String OC_TOOL = "agentTool";
     public static final String OC_IDENTITY_BINDING = "agentIdentityBinding";
     public static final String OC_KNOWLEDGE_BASE = "agentKnowledgeBase";
+    // OPENICF-431
+    public static final String OC_TOOL_CREDENTIALS = "agentToolCredentials";
+
+    // ---------------------------------------------------------------------
+    // S3 inventory key paths (bucket configured via inventoryBucket property)
+    // ---------------------------------------------------------------------
+    // OPENICF-431
+    public static final String AGENT_BINDINGS_S3_KEY =
+            "bedrock-core-inventory/latest/agent-bindings.json";
+    public static final String TOOL_CREDENTIALS_S3_KEY =
+            "bedrock-core-inventory/latest/agent-tool-credentials.json";
 
     // ---------------------------------------------------------------------
     // Common attribute names
@@ -63,6 +75,8 @@ public abstract class AwsBedrockConstants {
     public static final String ATTR_ALIAS_ID = "aliasId";
     public static final String ATTR_ALIAS_NAME = "aliasName";
     public static final String ATTR_ALIAS_STATUS = "agentAliasStatus";
+    // OPENICF-431: Forward pointer from agent/alias to its tool credential records
+    public static final String ATTR_TOOL_CREDENTIAL_IDS = "toolCredentialIds";
     // Knowledge base attributes
     // ---------------------------------------------------------------------
     public static final String ATTR_KNOWLEDGE_BASE_ID = "knowledgeBaseId";
@@ -82,7 +96,6 @@ public abstract class AwsBedrockConstants {
     public static final String ATTR_GUARDRAIL_BLOCKED_INPUT_MESSAGE = "blockedInputMessaging";
     public static final String ATTR_GUARDRAIL_BLOCKED_OUTPUT_MESSAGE = "blockedOutputMessaging";
 
-
     // ---------------------------------------------------------------------
     // Tool (Action Group) attributes
     // ---------------------------------------------------------------------
@@ -91,6 +104,24 @@ public abstract class AwsBedrockConstants {
     public static final String ATTR_ACTION_GROUP_EXECUTOR_ARN = "executorArn";
     public static final String ATTR_ACTION_GROUP_PARENT_SIGNATURE = "parentActionGroupSignature";
     public static final String ATTR_ACTION_GROUP_SCHEMA_URI = "schemaUri";
+
+    // ---------------------------------------------------------------------
+    // agentToolCredentials attributes (OPENICF-431)
+    // ---------------------------------------------------------------------
+    public static final String ATTR_TC_ID = "id";
+    public static final String ATTR_TC_AGENT_ARN = "agentArn";
+    public static final String ATTR_TC_AGENT_SERVICE_ROLE_ARN = "agentServiceRoleArn";
+    public static final String ATTR_TC_ACTION_GROUP_ID = "actionGroupId";
+    public static final String ATTR_TC_ACTION_GROUP_NAME = "actionGroupName";
+    public static final String ATTR_TC_ACTION_GROUP_STATE = "actionGroupState";
+    public static final String ATTR_TC_CREDENTIAL_TYPE = "credentialType";
+    public static final String ATTR_TC_CREDENTIAL_REF = "credentialRef";
+    public static final String ATTR_TC_API_SCHEMA_SOURCE = "apiSchemaSource";
+    public static final String ATTR_TC_FUNCTION_SCHEMA = "functionSchema";
+    public static final String ATTR_TC_ACCOUNT_ID = "accountId";
+    public static final String ATTR_TC_REGION = "region";
+    // OPENICF-432: Lambda execution role — null until Python Lambda is updated
+    public static final String ATTR_TC_LAMBDA_EXECUTION_ROLE_ARN = "lambdaExecutionRoleArn";
 
     // ---------------------------------------------------------------------
     // Identity binding attributes
@@ -108,6 +139,7 @@ public abstract class AwsBedrockConstants {
     // Multi-agent collaboration
     public static final String ATTR_AGENT_COLLABORATION = "agentCollaboration";
     public static final String ATTR_CONNECTED_AGENTS = "connectedAgents";
+
     private AwsBedrockConstants() {
         // prevent instantiation
     }

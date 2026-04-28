@@ -7,7 +7,7 @@
 
     <groupId>org.forgerock.openicf.connectors</groupId>
     <artifactId>awsbedrock-connector</artifactId>
-    <version>1.5.20.29</version>
+    <version>1.5.20.33</version>
     <packaging>bundle</packaging>
 
 

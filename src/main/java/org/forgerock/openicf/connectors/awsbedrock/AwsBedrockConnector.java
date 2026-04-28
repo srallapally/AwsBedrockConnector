@@ -1,3 +1,4 @@
+// src/main/java/org/forgerock/openicf/connectors/awsbedrock/AwsBedrockConnector.java
 package org.forgerock.openicf.connectors.awsbedrock;
 
 import org.forgerock.openicf.connectors.awsbedrock.operations.AwsBedrockCrudService;
@@ -46,6 +47,10 @@ public class AwsBedrockConnector implements Connector,
             new ObjectClass(AwsBedrockConstants.OC_IDENTITY_BINDING);
     public static final ObjectClass OC_KNOWLEDGE_BASE =
             new ObjectClass(AwsBedrockConstants.OC_KNOWLEDGE_BASE);
+    // OPENICF-431
+    public static final ObjectClass OC_TOOL_CREDENTIALS =
+            new ObjectClass(AwsBedrockConstants.OC_TOOL_CREDENTIALS);
+
     private AwsBedrockConfiguration configuration;
     private AwsBedrockConnection connection;
     private AwsBedrockCrudService crudService;
@@ -124,7 +129,7 @@ public class AwsBedrockConnector implements Connector,
                 AwsBedrockConstants.ATTR_KNOWLEDGE_BASES, String.class, EnumSet.of(AttributeInfo.Flags.MULTIVALUED)));
         // NEW: virtual, computed principals attribute (multi-valued, read-only)
         agent.addAttributeInfo(AttributeInfoBuilder.build(
-                AwsBedrockConstants.ATTR_AGENT_PRINCIPALS, String.class,EnumSet.of(AttributeInfo.Flags.MULTIVALUED,
+                AwsBedrockConstants.ATTR_AGENT_PRINCIPALS, String.class, EnumSet.of(AttributeInfo.Flags.MULTIVALUED,
                         AttributeInfo.Flags.NOT_CREATABLE, AttributeInfo.Flags.NOT_UPDATEABLE)));
         agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_GUARDRAIL_ID, String.class));
         agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_GUARDRAIL_VERSION, String.class));
@@ -146,6 +151,10 @@ public class AwsBedrockConnector implements Connector,
         agent.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_AGENT_COLLABORATION, String.class));
         agent.addAttributeInfo(AttributeInfoBuilder.build(
                 AwsBedrockConstants.ATTR_CONNECTED_AGENTS, String.class, EnumSet.of(AttributeInfo.Flags.MULTIVALUED)));
+        // OPENICF-431: Forward pointer to agentToolCredentials records for this agent
+        agent.addAttributeInfo(AttributeInfoBuilder.build(
+                AwsBedrockConstants.ATTR_TOOL_CREDENTIAL_IDS, String.class, EnumSet.of(AttributeInfo.Flags.MULTIVALUED,
+                        AttributeInfo.Flags.NOT_CREATABLE, AttributeInfo.Flags.NOT_UPDATEABLE)));
         builder.defineObjectClass(agent.build());
 
         // -----------------------------------------------------------------
@@ -214,6 +223,28 @@ public class AwsBedrockConnector implements Connector,
         idBinding.addAttributeInfo(AttributeInfoBuilder.build(
                 AwsBedrockConstants.ATTR_PERMISSIONS, String.class, EnumSet.of(AttributeInfo.Flags.MULTIVALUED)));
         builder.defineObjectClass(idBinding.build());
+
+        // -----------------------------------------------------------------
+        // agentToolCredentials object class (OPENICF-431)
+        // -----------------------------------------------------------------
+        ObjectClassInfoBuilder tc = new ObjectClassInfoBuilder();
+        tc.setType(AwsBedrockConstants.OC_TOOL_CREDENTIALS);
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_ID, String.class));
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_AGENT_ID, String.class));
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_AGENT_ARN, String.class));
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_AGENT_SERVICE_ROLE_ARN, String.class));
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_ACTION_GROUP_ID, String.class));
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_ACTION_GROUP_NAME, String.class));
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_ACTION_GROUP_STATE, String.class));
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_CREDENTIAL_TYPE, String.class));
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_CREDENTIAL_REF, String.class));
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_API_SCHEMA_SOURCE, String.class));
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_FUNCTION_SCHEMA, String.class));
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_ACCOUNT_ID, String.class));
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_REGION, String.class));
+        // OPENICF-432: null until Python Lambda is updated with lambda:GetFunction
+        tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_LAMBDA_EXECUTION_ROLE_ARN, String.class));
+        builder.defineObjectClass(tc.build());
 
         Schema schema = builder.build();
         LOG.ok("Schema built for AwsBedrockConnector.");
@@ -294,6 +325,9 @@ public class AwsBedrockConnector implements Connector,
             crudService.searchTools(objectClass, query, pagingHandler, options);
         } else if (objectClass.is(OC_IDENTITY_BINDING.getObjectClassValue())) {
             crudService.searchIdentityBindings(objectClass, query, pagingHandler, options);
+            // OPENICF-431
+        } else if (objectClass.is(OC_TOOL_CREDENTIALS.getObjectClassValue())) {
+            crudService.searchToolCredentials(objectClass, query, pagingHandler, options);
         } else {
             throw new UnsupportedOperationException("Unsupported ObjectClass for search: " + objectClass);
         }
@@ -322,6 +356,9 @@ public class AwsBedrockConnector implements Connector,
             co = crudService.getTool(objectClass, uid, options);
         } else if (objectClass.is(OC_IDENTITY_BINDING.getObjectClassValue())) {
             co = crudService.getIdentityBinding(objectClass, uid, options);
+            // OPENICF-431
+        } else if (objectClass.is(OC_TOOL_CREDENTIALS.getObjectClassValue())) {
+            co = crudService.getToolCredential(objectClass, uid, options);
         } else {
             throw new UnsupportedOperationException("Unsupported ObjectClass for GET: " + objectClass);
         }

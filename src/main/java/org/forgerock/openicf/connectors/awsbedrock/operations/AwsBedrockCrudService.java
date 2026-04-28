@@ -55,8 +55,12 @@ public class AwsBedrockCrudService {
     // key -> list of bindings
     private volatile Map<String, List<AgentIdentityBinding>> bindingsByKey = new ConcurrentHashMap<>();
     private volatile Instant bindingsLoadedAt = Instant.EPOCH;
-    // 5 minutes
     private static final String WILDCARD_KEY = "WILDCARD";
+
+    // OPENICF-431: Tool credentials cache — id -> record, agentId -> list of ids
+    private volatile Map<String, JsonNode> toolCredentialsById = new ConcurrentHashMap<>();
+    private volatile Map<String, List<String>> toolCredentialIdsByAgent = new ConcurrentHashMap<>();
+    private volatile Instant toolCredentialsLoadedAt = Instant.EPOCH;
 
     public AwsBedrockCrudService(AwsBedrockConnection connection) {
         this.connection = connection;
@@ -294,10 +298,17 @@ public class AwsBedrockCrudService {
         List<AgentSummary> summaries = client.listAgents();
 
         for (AgentSummary summary : summaries) {
+            // OPENICF-426: null aliasId → all bindings for this agent
             List<AgentIdentityBinding> bindings =
-                    listIdentityBindingsForAgentAndAliases(client, summary.agentId());
+                    listIdentityBindingsForAgent(client, summary.agentId(), null);
 
             for (AgentIdentityBinding binding : bindings) {
+                // OPENICF-427: Skip wildcard bindings here — emitted once below to avoid
+                // duplicate UIDs (one wildcard binding would otherwise appear once per agent).
+                if ("*".equals(binding.agentId)) {
+                    continue;
+                }
+
                 ConnectorObject obj = toIdentityBindingConnectorObject(objectClass, binding);
                 if (obj == null) {
                     continue;
@@ -311,6 +322,47 @@ public class AwsBedrockCrudService {
                     LOG.ok("Handler requested to stop processing identity bindings.");
                     return;
                 }
+            }
+        }
+
+        // OPENICF-427: Emit wildcard bindings exactly once — not scoped to any specific
+        // agent, so must not be repeated per agent.
+        Map<String, List<AgentIdentityBinding>> cache = getBindingsCache();
+        List<AgentIdentityBinding> wildcardBindings = cache.get(WILDCARD_KEY);
+        if (wildcardBindings != null) {
+            for (AgentIdentityBinding binding : wildcardBindings) {
+                ConnectorObject obj = toIdentityBindingConnectorObject(objectClass, binding);
+                if (obj == null) {
+                    continue;
+                }
+                if (query != null && !query.accept(obj)) {
+                    continue;
+                }
+                if (!handler.handle(obj)) {
+                    LOG.ok("Handler requested to stop processing identity bindings.");
+                    return;
+                }
+            }
+        }
+    }
+
+    // OPENICF-431: Search all agentToolCredentials records from the S3 cache.
+    public void searchToolCredentials(ObjectClass objectClass,
+                                      Filter query,
+                                      ResultsHandler handler,
+                                      OperationOptions options) {
+        Map<String, JsonNode> cache = getToolCredentialsCache();
+        for (JsonNode record : cache.values()) {
+            ConnectorObject obj = toToolCredentialConnectorObject(objectClass, record);
+            if (obj == null) {
+                continue;
+            }
+            if (query != null && !query.accept(obj)) {
+                continue;
+            }
+            if (!handler.handle(obj)) {
+                LOG.ok("Handler requested to stop processing tool credentials.");
+                return;
             }
         }
     }
@@ -423,6 +475,7 @@ public class AwsBedrockCrudService {
 
         return null;
     }
+
     public ConnectorObject getKnowledgeBase(ObjectClass objectClass,
                                             Uid uid,
                                             OperationOptions options) {
@@ -469,8 +522,9 @@ public class AwsBedrockCrudService {
 
         AwsBedrockClient client = client();
 
+        // OPENICF-426: null aliasId → search all bindings for this agent
         List<AgentIdentityBinding> bindings =
-                listIdentityBindingsForAgentAndAliases(client, key.agentId());
+                listIdentityBindingsForAgent(client, key.agentId(), null);
 
         for (AgentIdentityBinding binding : bindings) {
             if (binding.scope.equals(key.scope())
@@ -483,14 +537,30 @@ public class AwsBedrockCrudService {
         return null;
     }
 
+    // OPENICF-431: GET by UID for agentToolCredentials — UID is the tc-* id field.
+    public ConnectorObject getToolCredential(ObjectClass objectClass,
+                                             Uid uid,
+                                             OperationOptions options) {
+        Map<String, JsonNode> cache = getToolCredentialsCache();
+        JsonNode record = cache.get(uid.getUidValue());
+        if (record == null) {
+            LOG.ok("No tool credential found for UID {0}", uid.getUidValue());
+            return null;
+        }
+        return toToolCredentialConnectorObject(objectClass, record);
+    }
 
     // =================================================================
     // Mapping helpers
     // =================================================================
 
     // OPENICF-424: Common agent attribute mapping shared by both bare-agent and alias paths.
+    // OPENICF-426: Added aliasId parameter to scope identity binding lookup.
+    //   aliasId == null → all bindings (bare agent rollup view)
+    //   aliasId != null → agent-level bindings + this alias's bindings only
+    // OPENICF-431: Populates toolCredentialIds from tool credentials cache.
     // Sets all agent-level attributes on the builder. Does NOT set UID, NAME, or alias attributes.
-    private void buildCommonAgentAttributes(ConnectorObjectBuilder b, Agent agent) {
+    private void buildCommonAgentAttributes(ConnectorObjectBuilder b, Agent agent, String aliasId) {
         String agentId = agent.agentId();
 
         b.addAttribute(AttributeBuilder.build(ATTR_PLATFORM, AwsBedrockConstants.CONNECTOR_NAME));
@@ -610,13 +680,11 @@ public class AwsBedrockCrudService {
                     collaboratorIds));
         }
 
-        // Virtual principals (agentPrincipals) derived from identity bindings.
+        // OPENICF-426: Scope identity bindings to the specific alias (or all for bare agents).
         long start = System.currentTimeMillis();
         try {
             List<AgentIdentityBinding> bindings =
-                    listIdentityBindingsForAgentAndAliases(
-                            client(),
-                            agentId);
+                    listIdentityBindingsForAgent(client(), agentId, aliasId);
 
             Set<String> principals = new LinkedHashSet<>();
             for (AgentIdentityBinding binding : bindings) {
@@ -637,6 +705,19 @@ public class AwsBedrockCrudService {
         }
         long elapsed = System.currentTimeMillis() - start;
         LOG.info("Computed identity bindings for agent {0} in {1} ms", agentId, elapsed);
+
+        // OPENICF-431: Forward pointer — tool credential IDs for this agent.
+        try {
+            getToolCredentialsCache(); // ensure cache is warm
+            List<String> credIds = toolCredentialIdsByAgent.get(agentId);
+            if (credIds != null && !credIds.isEmpty()) {
+                b.addAttribute(AttributeBuilder.build(
+                        ATTR_TOOL_CREDENTIAL_IDS,
+                        credIds.toArray(new String[0])));
+            }
+        } catch (Exception e) {
+            LOG.warn(e, "Failed to compute toolCredentialIds for agent {0}", agentId);
+        }
     }
 
     // OPENICF-424: Renamed from toAgentConnectorObject. Bare agent (no alias) path.
@@ -652,7 +733,8 @@ public class AwsBedrockCrudService {
         b.setUid(new Uid(toAgentUid(agentId)));
         b.setName(new Name(agent.agentName()));
 
-        buildCommonAgentAttributes(b, agent);
+        // OPENICF-426: null aliasId → all bindings (rollup view for bare agent)
+        buildCommonAgentAttributes(b, agent, null);
 
         return b.build();
     }
@@ -677,7 +759,8 @@ public class AwsBedrockCrudService {
         String aliasName = alias.agentAliasName() != null ? alias.agentAliasName() : aliasId;
         b.setName(new Name(agent.agentName() + " / " + aliasName));
 
-        buildCommonAgentAttributes(b, agent);
+        // OPENICF-426: pass aliasId so bindings are scoped to this alias only
+        buildCommonAgentAttributes(b, agent, aliasId);
 
         // OPENICF-424: Alias-specific attributes
         b.addAttribute(AttributeBuilder.build(ATTR_ALIAS_ID, aliasId));
@@ -766,6 +849,38 @@ public class AwsBedrockCrudService {
                 b.addAttribute(AttributeBuilder.build(ATTR_GUARDRAIL_STATE, status));
                 b.addAttribute(AttributeBuilder.build(ATTR_GUARDRAIL_DEPLOYMENT_STATUS, status));
             }
+
+            // OPENICF-428: Serialize full contentPolicy as JSON into both inputAction and
+            // outputAction. Each filter entry carries its own inputAction/outputAction fields;
+            // there is no single top-level action value. Both attributes receive the same
+            // payload so neither is null. A future schema revision can split them properly.
+            // AWS SDK model objects are not Jackson-serializable directly; convert to Maps first.
+            if (details.contentPolicy() != null && details.contentPolicy().filters() != null) {
+                try {
+                    List<Map<String, Object>> filterMaps = new ArrayList<>();
+                    for (software.amazon.awssdk.services.bedrock.model.GuardrailContentFilter f
+                            : details.contentPolicy().filters()) {
+                        Map<String, Object> m = new LinkedHashMap<>();
+                        m.put("type", f.typeAsString());
+                        m.put("inputStrength", f.inputStrengthAsString());
+                        m.put("outputStrength", f.outputStrengthAsString());
+                        m.put("inputAction", f.inputActionAsString());
+                        m.put("outputAction", f.outputActionAsString());
+                        if (f.inputModalities() != null) {
+                            m.put("inputModalities", f.inputModalitiesAsStrings());
+                        }
+                        if (f.outputModalities() != null) {
+                            m.put("outputModalities", f.outputModalitiesAsStrings());
+                        }
+                        filterMaps.add(m);
+                    }
+                    String contentPolicyJson = JSON_MAPPER.writeValueAsString(filterMaps);
+                    b.addAttribute(AttributeBuilder.build(ATTR_GUARDRAIL_INPUT_ACTION, contentPolicyJson));
+                    b.addAttribute(AttributeBuilder.build(ATTR_GUARDRAIL_OUTPUT_ACTION, contentPolicyJson));
+                } catch (Exception e) {
+                    LOG.warn(e, "Failed to serialize contentPolicy for guardrail {0}", guardrailId);
+                }
+            }
         }
 
         return b.build();
@@ -808,8 +923,6 @@ public class AwsBedrockCrudService {
         String state = kb.knowledgeBaseStateAsString();
         if (state != null && !state.isEmpty()) {
             b.addAttribute(AttributeBuilder.build(ATTR_STATUS, state));
-            // If you want to keep raw state separately:
-            // b.addAttribute(AttributeBuilder.build(ATTR_KNOWLEDGE_BASE_STATE, state));
         }
 
         if (kb.updatedAt() != null) {
@@ -886,6 +999,16 @@ public class AwsBedrockCrudService {
                                 schemaUri));
                     }
                 }
+
+                // OPENICF-429: parentActionSignature — identifies built-in system action groups
+                // (e.g. AMAZON.UserInput, AMAZON.CodeInterpreter). Available from getAgentActionGroup().
+                // SDK method is parentActionSignatureAsString() — note "Action" not "ActionGroup".
+                String parentSig = detail.parentActionSignatureAsString();
+                if (parentSig != null && !parentSig.isEmpty()) {
+                    b.addAttribute(AttributeBuilder.build(
+                            ATTR_ACTION_GROUP_PARENT_SIGNATURE,
+                            parentSig));
+                }
             }
         } catch (BedrockAgentException e) {
             LOG.info(e,
@@ -895,6 +1018,63 @@ public class AwsBedrockCrudService {
         }
 
         return b.build();
+    }
+
+    // OPENICF-431: Map a raw JsonNode record from agent-tool-credentials.json into
+    // an ICF ConnectorObject for the agentToolCredentials object class.
+    // UID = the Lambda-computed id field (tc-{sha256[:16]}).
+    // __NAME__ = actionGroupName (human-readable; falls back to actionGroupId).
+    private ConnectorObject toToolCredentialConnectorObject(ObjectClass objectClass, JsonNode record) {
+        if (record == null) {
+            return null;
+        }
+        String id = textOrNull(record, "id");
+        if (id == null || id.isEmpty()) {
+            return null;
+        }
+
+        ConnectorObjectBuilder b = new ConnectorObjectBuilder();
+        b.setObjectClass(objectClass);
+        b.setUid(new Uid(id));
+
+        String name = textOrNull(record, "actionGroupName");
+        if (name == null || name.isEmpty()) {
+            name = textOrNull(record, "actionGroupId");
+        }
+        b.setName(new Name(name != null ? name : id));
+
+        b.addAttribute(AttributeBuilder.build(ATTR_TC_ID, id));
+        addIfPresent(b, record, "agentId",             ATTR_AGENT_ID);
+        addIfPresent(b, record, "agentArn",            ATTR_TC_AGENT_ARN);
+        addIfPresent(b, record, "agentServiceRoleArn", ATTR_TC_AGENT_SERVICE_ROLE_ARN);
+        addIfPresent(b, record, "actionGroupId",       ATTR_TC_ACTION_GROUP_ID);
+        addIfPresent(b, record, "actionGroupName",     ATTR_TC_ACTION_GROUP_NAME);
+        addIfPresent(b, record, "actionGroupState",    ATTR_TC_ACTION_GROUP_STATE);
+        addIfPresent(b, record, "credentialType",      ATTR_TC_CREDENTIAL_TYPE);
+        addIfPresent(b, record, "credentialRef",       ATTR_TC_CREDENTIAL_REF);
+        addIfPresent(b, record, "apiSchemaSource",     ATTR_TC_API_SCHEMA_SOURCE);
+        addIfPresent(b, record, "accountId",           ATTR_TC_ACCOUNT_ID);
+        addIfPresent(b, record, "region",              ATTR_TC_REGION);
+        // OPENICF-432: absent until Python Lambda adds lambda:GetFunction call
+        addIfPresent(b, record, "lambdaExecutionRoleArn", ATTR_TC_LAMBDA_EXECUTION_ROLE_ARN);
+
+        // functionSchema is a boolean in the payload — serialize as String for ICF
+        JsonNode fsNode = record.get("functionSchema");
+        if (fsNode != null && !fsNode.isNull()) {
+            b.addAttribute(AttributeBuilder.build(ATTR_TC_FUNCTION_SCHEMA,
+                    String.valueOf(fsNode.asBoolean())));
+        }
+
+        return b.build();
+    }
+
+    // Helper: add a String attribute only when the field is present and non-null in the record.
+    private void addIfPresent(ConnectorObjectBuilder b, JsonNode record,
+                              String jsonField, String attrName) {
+        String value = textOrNull(record, jsonField);
+        if (value != null) {
+            b.addAttribute(AttributeBuilder.build(attrName, value));
+        }
     }
 
     /**
@@ -1004,33 +1184,54 @@ public class AwsBedrockCrudService {
         return type + ":" + acct + ":" + arn;
     }
 
-    private List<AgentIdentityBinding> listIdentityBindingsForAgentAndAliases(AwsBedrockClient client,
-                                                                              String agentId) {
+    // OPENICF-426: Replaced listIdentityBindingsForAgentAndAliases with alias-scoped variant.
+    // When aliasId is null, returns all bindings (agent-level + all aliases) — used by
+    //   bare agent path and searchIdentityBindings.
+    // When aliasId is non-null, returns agent-level bindings + only that alias's bindings —
+    //   used by alias ConnectorObject path so agentPrincipals is scoped correctly.
+    private List<AgentIdentityBinding> listIdentityBindingsForAgent(AwsBedrockClient client,
+                                                                    String agentId,
+                                                                    String aliasId) {
         Map<String, List<AgentIdentityBinding>> cache = getBindingsCache();
         List<AgentIdentityBinding> results = new ArrayList<>();
 
-        // 1. Agent-level bindings
+        // 1. Agent-level bindings (always included)
         List<AgentIdentityBinding> direct = cache.get(agentKey(agentId));
         if (direct != null) {
             results.addAll(direct);
         }
 
-        // 2. Alias-level bindings
-        List<AgentAliasSummary> aliases = client.listAgentAliases(agentId);
-        if (aliases != null && !aliases.isEmpty()) {
-            for (AgentAliasSummary alias : aliases) {
-                String aliasId = alias.agentAliasId();
-                if (aliasId == null || aliasId.isEmpty()) {
-                    continue;
-                }
-                List<AgentIdentityBinding> aliasBindings = cache.get(aliasKey(agentId, aliasId));
-                if (aliasBindings != null) {
-                    results.addAll(aliasBindings);
+        // OPENICF-427: Wildcard bindings apply to every agent and alias.
+        List<AgentIdentityBinding> wildcardBindings = cache.get(WILDCARD_KEY);
+        if (wildcardBindings != null) {
+            results.addAll(wildcardBindings);
+        }
+
+        if (aliasId != null) {
+            // OPENICF-426: Scoped — only this alias's bindings
+            List<AgentIdentityBinding> aliasBindings = cache.get(aliasKey(agentId, aliasId));
+            if (aliasBindings != null) {
+                results.addAll(aliasBindings);
+            }
+        } else {
+            // All alias bindings (bare agent rollup or identity binding search)
+            List<AgentAliasSummary> aliases = client.listAgentAliases(agentId);
+            if (aliases != null && !aliases.isEmpty()) {
+                for (AgentAliasSummary alias : aliases) {
+                    String aId = alias.agentAliasId();
+                    if (aId == null || aId.isEmpty()) {
+                        continue;
+                    }
+                    List<AgentIdentityBinding> aliasBindings = cache.get(aliasKey(agentId, aId));
+                    if (aliasBindings != null) {
+                        results.addAll(aliasBindings);
+                    }
                 }
             }
         }
 
-        LOG.ok("Resolved {0} identity bindings for agent {1}", results.size(), agentId);
+        LOG.ok("Resolved {0} identity bindings for agent {1} (aliasId={2})",
+                results.size(), agentId, aliasId != null ? aliasId : "ALL");
         return results;
     }
 
@@ -1175,12 +1376,15 @@ public class AwsBedrockCrudService {
         }
         return actions;
     }
+
+    // OPENICF-431: Updated to read from inventoryBucket + AGENT_BINDINGS_S3_KEY constant.
+    // Previously read from s3BindingsBucket + "{accountId}/{region}/bindings.json".
     private Map<String, List<AgentIdentityBinding>> loadBindingsFromS3() {
         AwsBedrockClient client = client();
         String accountId = client.getAccountId();
         String region = client.getRegion();
-        String bucket = connection.getConfiguration().getS3BindingsBucket();; // as per your design
-        String key = accountId + "/" + region + "/bindings.json";
+        String bucket = connection.getConfiguration().getInventoryBucket();
+        String key = AGENT_BINDINGS_S3_KEY;
 
         Map<String, List<AgentIdentityBinding>> map = new HashMap<>();
 
@@ -1230,7 +1434,28 @@ public class AwsBedrockCrudService {
                             }
                             scope = "AGENT";
                         } else {
-                            // We currently ignore wildcard entries here; can extend later.
+                            // OPENICF-427: Wildcard binding (no agentArn, no aliasArn).
+                            // Applies to all agents and aliases; stored under WILDCARD_KEY.
+                            // principalArn is set; scope treated as "AGENT" for consistency
+                            // with agentIdentityBinding object class conventions.
+                            boolean isWildcard = b.has("wildcard") && b.get("wildcard").asBoolean();
+                            if (!isWildcard || principalArn == null || principalArn.isEmpty()) {
+                                continue;
+                            }
+                            List<String> actions = Collections.singletonList("bedrock:InvokeAgent");
+                            AgentIdentityBinding binding = new AgentIdentityBinding(
+                                    "*",           // agentId sentinel — wildcard applies to all agents
+                                    null,          // agentVersion not encoded in IAM policy
+                                    "AGENT",       // scope — consistent with agentIdentityBinding conventions
+                                    null,          // aliasId
+                                    principalArn,
+                                    principalType,
+                                    bindingAccountId,
+                                    actions,
+                                    "ALLOW",
+                                    textOrNull(b, "conditionJson")
+                            );
+                            map.computeIfAbsent(WILDCARD_KEY, k -> new ArrayList<>()).add(binding);
                             continue;
                         }
 
@@ -1266,9 +1491,9 @@ public class AwsBedrockCrudService {
 
             LOG.ok("Loaded {0} identity binding key entries from S3", map.size());
         } catch (NoSuchKeyException e) {
-            LOG.warn(e, "No precomputed bindings file found for account {0} region {1}", accountId, region);
+            LOG.warn(e, "No precomputed bindings file found at s3://{0}/{1}", bucket, key);
         } catch (Exception e) {
-            LOG.error(e, "Failed to load precomputed bindings from S3 for account {0} region {1}", accountId, region);
+            LOG.error(e, "Failed to load precomputed bindings from S3 at s3://{0}/{1}", bucket, key);
         }
 
         return map;
@@ -1289,6 +1514,66 @@ public class AwsBedrockCrudService {
             }
         }
         return bindingsByKey;
+    }
+
+    // OPENICF-431: Load agent-tool-credentials.json from S3 and index by id and agentId.
+    private void loadToolCredentialsFromS3() {
+        String bucket = connection.getConfiguration().getInventoryBucket();
+        String key = TOOL_CREDENTIALS_S3_KEY;
+
+        Map<String, JsonNode> byId = new HashMap<>();
+        Map<String, List<String>> byAgent = new HashMap<>();
+
+        try {
+            GetObjectRequest req = GetObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(key)
+                    .build();
+
+            try (ResponseInputStream<GetObjectResponse> in = s3Client().getObject(req)) {
+                JsonNode root = JSON_MAPPER.readTree(in);
+                if (root != null && root.isArray()) {
+                    for (JsonNode record : root) {
+                        String id = textOrNull(record, "id");
+                        String agentId = textOrNull(record, "agentId");
+                        if (id == null || id.isEmpty()) {
+                            continue;
+                        }
+                        byId.put(id, record);
+                        if (agentId != null && !agentId.isEmpty()) {
+                            byAgent.computeIfAbsent(agentId, k -> new ArrayList<>()).add(id);
+                        }
+                    }
+                }
+            }
+
+            LOG.ok("Loaded {0} tool credential records from S3", byId.size());
+        } catch (NoSuchKeyException e) {
+            LOG.warn(e, "No tool credentials file found at s3://{0}/{1}", bucket, key);
+        } catch (Exception e) {
+            LOG.error(e, "Failed to load tool credentials from S3 at s3://{0}/{1}", bucket, key);
+        }
+
+        toolCredentialsById = byId;
+        toolCredentialIdsByAgent = byAgent;
+    }
+
+    // OPENICF-431: TTL-driven cache for tool credentials — mirrors getBindingsCache() pattern.
+    private Map<String, JsonNode> getToolCredentialsCache() {
+        Instant now = Instant.now();
+        long cacheTtl = connection.getConfiguration().getBindingsCacheTtlSeconds();
+        if (toolCredentialsById.isEmpty()
+                || toolCredentialsLoadedAt.plusSeconds(cacheTtl).isBefore(now)) {
+            synchronized (this) {
+                if (toolCredentialsById.isEmpty()
+                        || toolCredentialsLoadedAt.plusSeconds(cacheTtl).isBefore(now)) {
+                    LOG.ok("Refreshing tool credentials cache from S3");
+                    loadToolCredentialsFromS3();
+                    toolCredentialsLoadedAt = now;
+                }
+            }
+        }
+        return toolCredentialsById;
     }
 
     private String extractAgentIdFromAgentArn(String agentArn) {
@@ -1339,6 +1624,7 @@ public class AwsBedrockCrudService {
     private String asTextOrNull(JsonNode node) {
         return (node != null && !node.isNull()) ? node.asText() : null;
     }
+
     private String textOrNull(JsonNode node, String field) {
         if (node == null) {
             return null;
