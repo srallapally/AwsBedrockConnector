@@ -38,9 +38,9 @@ public abstract class AwsBedrockConstants {
     // ---------------------------------------------------------------------
     // OPENICF-431
     public static final String AGENT_BINDINGS_S3_KEY =
-            "/latest/agent-bindings.json";
+            "latest/agent-bindings.json";
     public static final String TOOL_CREDENTIALS_S3_KEY =
-            "/latest/agent-tool-credentials.json";
+            "latest/agent-tool-credentials.json";
 
     // ---------------------------------------------------------------------
     // Common attribute names
