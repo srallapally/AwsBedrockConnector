@@ -71,6 +71,8 @@ public abstract class AwsBedrockConstants {
     public static final String ATTR_RECOMMENDED_ACTIONS = "recommendedActions";
     public static final String ATTR_PREPARED_AT = "preparedAt";
     // OPENICF-420
+    // OPENICF-433: Forward pointer from agent/alias to its identity binding records
+    public static final String ATTR_IDENTITY_BINDING_IDS = "identityBindingIds";
     // Alias attributes
     public static final String ATTR_ALIAS_ID = "aliasId";
     public static final String ATTR_ALIAS_NAME = "aliasName";

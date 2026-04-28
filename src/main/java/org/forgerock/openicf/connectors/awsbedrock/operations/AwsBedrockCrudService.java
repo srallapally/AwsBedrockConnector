@@ -681,24 +681,38 @@ public class AwsBedrockCrudService {
         }
 
         // OPENICF-426: Scope identity bindings to the specific alias (or all for bare agents).
+        // OPENICF-433: Reuse the same binding list to populate both agentPrincipals and
+        //   identityBindingIds. UID format must match toIdentityBindingUid() exactly so
+        //   the forward pointer values resolve to real agentIdentityBinding objects.
         long start = System.currentTimeMillis();
         try {
             List<AgentIdentityBinding> bindings =
                     listIdentityBindingsForAgent(client(), agentId, aliasId);
 
             Set<String> principals = new LinkedHashSet<>();
+            Set<String> bindingIds = new LinkedHashSet<>();
             for (AgentIdentityBinding binding : bindings) {
                 String packed = packPrincipal(
                         binding.principalType,
                         binding.accountId,
                         binding.principalArn);
                 principals.add(packed);
+                // OPENICF-433: UID matches toIdentityBindingUid(agentId, scope, principalArn)
+                bindingIds.add(toIdentityBindingUid(
+                        binding.agentId,
+                        binding.scope,
+                        binding.principalArn));
             }
 
             if (!principals.isEmpty()) {
                 b.addAttribute(AttributeBuilder.build(
                         ATTR_AGENT_PRINCIPALS,
                         principals.toArray(new String[0])));
+            }
+            if (!bindingIds.isEmpty()) {
+                b.addAttribute(AttributeBuilder.build(
+                        ATTR_IDENTITY_BINDING_IDS,
+                        bindingIds.toArray(new String[0])));
             }
         } catch (Exception e) {
             LOG.warn(e, "Failed to compute agentPrincipals for agent {0}", agentId);

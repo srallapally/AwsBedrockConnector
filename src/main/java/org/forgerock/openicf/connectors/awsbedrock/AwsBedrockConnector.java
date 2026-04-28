@@ -155,6 +155,10 @@ public class AwsBedrockConnector implements Connector,
         agent.addAttributeInfo(AttributeInfoBuilder.build(
                 AwsBedrockConstants.ATTR_TOOL_CREDENTIAL_IDS, String.class, EnumSet.of(AttributeInfo.Flags.MULTIVALUED,
                         AttributeInfo.Flags.NOT_CREATABLE, AttributeInfo.Flags.NOT_UPDATEABLE)));
+        // OPENICF-433: Forward pointer to agentIdentityBinding records for this agent/alias
+        agent.addAttributeInfo(AttributeInfoBuilder.build(
+                AwsBedrockConstants.ATTR_IDENTITY_BINDING_IDS, String.class, EnumSet.of(AttributeInfo.Flags.MULTIVALUED,
+                        AttributeInfo.Flags.NOT_CREATABLE, AttributeInfo.Flags.NOT_UPDATEABLE)));
         builder.defineObjectClass(agent.build());
 
         // -----------------------------------------------------------------
