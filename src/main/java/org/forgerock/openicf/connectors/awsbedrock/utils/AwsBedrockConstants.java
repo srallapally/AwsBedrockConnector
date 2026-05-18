@@ -41,7 +41,9 @@ public abstract class AwsBedrockConstants {
             "latest/agent-bindings.json";
     public static final String TOOL_CREDENTIALS_S3_KEY =
             "latest/agent-tool-credentials.json";
-
+    // OPENICF-475: Manifest S3 key for objectClassSchema read
+    public static final String MANIFEST_S3_KEY =
+            "latest/manifest.json";
     // ---------------------------------------------------------------------
     // Common attribute names
     // ---------------------------------------------------------------------

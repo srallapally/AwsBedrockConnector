@@ -62,6 +62,10 @@ public class AwsBedrockCrudService {
     private volatile Map<String, List<String>> toolCredentialIdsByAgent = new ConcurrentHashMap<>();
     private volatile Instant toolCredentialsLoadedAt = Instant.EPOCH;
 
+    // OPENICF-475: Manifest objectClassSchema cache — OC name -> schema JsonNode
+    private volatile Map<String, JsonNode> manifestObjectClassSchema = Collections.emptyMap();
+    private volatile Instant manifestSchemaLoadedAt = Instant.EPOCH;
+
     public AwsBedrockCrudService(AwsBedrockConnection connection) {
         this.connection = connection;
     }
@@ -522,9 +526,15 @@ public class AwsBedrockCrudService {
 
         AwsBedrockClient client = client();
 
-        // OPENICF-426: null aliasId → search all bindings for this agent
-        List<AgentIdentityBinding> bindings =
-                listIdentityBindingsForAgent(client, key.agentId(), null);
+        // OPENICF-436: wildcard bindings (agentId == "*") are stored under WILDCARD_KEY —
+        // bypass listIdentityBindingsForAgent() which would pass "*" literally to ListAgentAliases.
+        List<AgentIdentityBinding> bindings;
+        if ("*".equals(key.agentId())) {
+            Map<String, List<AgentIdentityBinding>> cache = getBindingsCache();
+            bindings = cache.getOrDefault(WILDCARD_KEY, Collections.emptyList());
+        } else {
+            bindings = listIdentityBindingsForAgent(client, key.agentId(), null);
+        }
 
         for (AgentIdentityBinding binding : bindings) {
             if (binding.scope.equals(key.scope())
@@ -641,7 +651,9 @@ public class AwsBedrockCrudService {
             List<ActionGroupSummary> groups =
                     client().listAgentActionGroups(agentId, agentVersion);
             for (ActionGroupSummary g : groups) {
-                toolIds.add(g.actionGroupId());
+                // OPENICF-434: full agentTool UID so tools[] resolves to agentTool._id directly
+                toolIds.add(toToolUid(agentId, g.actionGroupId()));
+                //toolIds.add(g.actionGroupId());
             }
         } catch (Exception e) {
             LOG.warn(e, "Failed to list action groups for agent {0}", agentId);
@@ -656,7 +668,8 @@ public class AwsBedrockCrudService {
             List<AgentKnowledgeBaseSummary> kbs =
                     client().listAgentKnowledgeBases(agentId, agentVersion);
             for (AgentKnowledgeBaseSummary kb : kbs) {
-                kbIds.add(kb.knowledgeBaseId());
+                // OPENICF-435: full agentKnowledgeBase UID so knowledgeBases[] resolves to agentKnowledgeBase._id directly
+                kbIds.add(toKnowledgeBaseUid(agentId, kb.knowledgeBaseId()));
             }
         } catch (Exception e) {
             LOG.warn(e, "Failed to list knowledge bases for agent {0}", agentId);
@@ -771,7 +784,7 @@ public class AwsBedrockCrudService {
         b.setUid(new Uid(toAgentAliasUid(agentId, aliasId)));
         // OPENICF-424: __NAME__ = agentName / aliasName
         String aliasName = alias.agentAliasName() != null ? alias.agentAliasName() : aliasId;
-        b.setName(new Name(agent.agentName() + " / " + aliasName));
+        b.setName(new Name(agent.agentName() + "_" + aliasName));
 
         // OPENICF-426: pass aliasId so bindings are scoped to this alias only
         buildCommonAgentAttributes(b, agent, aliasId);
@@ -1588,6 +1601,62 @@ public class AwsBedrockCrudService {
             }
         }
         return toolCredentialsById;
+    }
+
+    // OPENICF-475: Load objectClassSchema from manifest.json in S3.
+    // Returns OC name -> schema block. Empty map on missing file or missing key.
+    private Map<String, JsonNode> loadManifestSchemaFromS3() {
+        String bucket = connection.getConfiguration().getInventoryBucket();
+        String key = AwsBedrockConstants.MANIFEST_S3_KEY;
+
+        try {
+            GetObjectRequest req = GetObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(key)
+                    .build();
+
+            try (ResponseInputStream<GetObjectResponse> in = s3Client().getObject(req)) {
+                JsonNode root = JSON_MAPPER.readTree(in);
+                JsonNode schemaNode = root.get("objectClassSchema");
+                if (schemaNode == null || !schemaNode.isObject()) {
+                    LOG.warn("manifest.json at s3://{0}/{1} has no objectClassSchema block", bucket, key);
+                    return Collections.emptyMap();
+                }
+
+                Map<String, JsonNode> result = new HashMap<>();
+                Iterator<Map.Entry<String, JsonNode>> fields = schemaNode.fields();
+                while (fields.hasNext()) {
+                    Map.Entry<String, JsonNode> entry = fields.next();
+                    result.put(entry.getKey(), entry.getValue());
+                }
+                LOG.ok("Loaded objectClassSchema with {0} object classes from manifest", result.size());
+                return result;
+            }
+        } catch (NoSuchKeyException e) {
+            LOG.warn(e, "No manifest file found at s3://{0}/{1}", bucket, key);
+        } catch (Exception e) {
+            LOG.error(e, "Failed to load manifest from S3 at s3://{0}/{1}", bucket, key);
+        }
+
+        return Collections.emptyMap();
+    }
+
+    // OPENICF-475: TTL-driven cache for manifest schema — mirrors getBindingsCache() pattern.
+    public Map<String, JsonNode> getManifestSchema() {
+        Instant now = Instant.now();
+        long cacheTtl = connection.getConfiguration().getBindingsCacheTtlSeconds();
+        if (manifestObjectClassSchema.isEmpty()
+                || manifestSchemaLoadedAt.plusSeconds(cacheTtl).isBefore(now)) {
+            synchronized (this) {
+                if (manifestObjectClassSchema.isEmpty()
+                        || manifestSchemaLoadedAt.plusSeconds(cacheTtl).isBefore(now)) {
+                    LOG.ok("Refreshing manifest objectClassSchema cache from S3");
+                    manifestObjectClassSchema = loadManifestSchemaFromS3();
+                    manifestSchemaLoadedAt = now;
+                }
+            }
+        }
+        return manifestObjectClassSchema;
     }
 
     private String extractAgentIdFromAgentArn(String agentArn) {

@@ -15,6 +15,7 @@ import org.identityconnectors.framework.spi.operations.*;
 
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -162,27 +163,151 @@ public class AwsBedrockConnector implements Connector,
         builder.defineObjectClass(agent.build());
 
         // -----------------------------------------------------------------
-        // agentKnowledgeBase object class (Knowledge Bases per Agent)
+        // OPENICF-475: 5 non-__ACCOUNT__ OCs — data-driven from manifest
+        // objectClassSchema, with hardcoded fallback for pre-474 Lambdas.
         // -----------------------------------------------------------------
+        if (!buildObjectClassesFromManifest(builder)) {
+            buildHardcodedObjectClasses(builder);
+        }
+
+        Schema schema = builder.build();
+        LOG.ok("Schema built for AwsBedrockConnector.");
+        return schema;
+    }
+
+    // ---------------------------------------------------------------------
+    // OPENICF-475: Data-driven OC schema from manifest objectClassSchema
+    // ---------------------------------------------------------------------
+
+    /**
+     * The 5 non-__ACCOUNT__ OC names that the manifest schema must contain
+     * for the data-driven path to succeed. If any are missing, fall back
+     * to hardcoded schema (all-or-nothing).
+     */
+    private static final Set<String> MANIFEST_OC_NAMES = Set.of(
+            AwsBedrockConstants.OC_GUARDRAIL,
+            AwsBedrockConstants.OC_KNOWLEDGE_BASE,
+            AwsBedrockConstants.OC_TOOL,
+            AwsBedrockConstants.OC_IDENTITY_BINDING,
+            AwsBedrockConstants.OC_TOOL_CREDENTIALS
+    );
+
+    private static final Map<String, Class<?>> TYPE_MAP = Map.of(
+            "string", String.class,
+            "integer", Integer.class
+    );
+
+    private static final Map<String, AttributeInfo.Flags> FLAG_MAP = Map.of(
+            "MULTIVALUED", AttributeInfo.Flags.MULTIVALUED,
+            "NOT_CREATABLE", AttributeInfo.Flags.NOT_CREATABLE,
+            "NOT_UPDATEABLE", AttributeInfo.Flags.NOT_UPDATEABLE,
+            "NOT_READABLE", AttributeInfo.Flags.NOT_READABLE,
+            "NOT_RETURNED_BY_DEFAULT", AttributeInfo.Flags.NOT_RETURNED_BY_DEFAULT,
+            "REQUIRED", AttributeInfo.Flags.REQUIRED
+    );
+
+    /**
+     * Attempt to build the 5 non-__ACCOUNT__ OCs from the manifest's
+     * objectClassSchema. Returns true if all 5 OCs were built; false
+     * if the manifest is unavailable or incomplete (caller should
+     * fall back to hardcoded schema).
+     */
+    private boolean buildObjectClassesFromManifest(SchemaBuilder builder) {
+        if (crudService == null) {
+            return false;
+        }
+
+        Map<String, com.fasterxml.jackson.databind.JsonNode> manifestSchema;
+        try {
+            manifestSchema = crudService.getManifestSchema();
+        } catch (Exception e) {
+            LOG.warn(e, "OPENICF-475: Failed to read manifest schema; falling back to hardcoded OC definitions");
+            return false;
+        }
+
+        if (manifestSchema == null || manifestSchema.isEmpty()) {
+            LOG.ok("OPENICF-475: No manifest objectClassSchema available; using hardcoded OC definitions");
+            return false;
+        }
+
+        // All-or-nothing: all 5 OCs must be present
+        for (String ocName : MANIFEST_OC_NAMES) {
+            if (!manifestSchema.containsKey(ocName)) {
+                LOG.warn("OPENICF-475: manifest objectClassSchema missing OC ''{0}''; falling back to hardcoded", ocName);
+                return false;
+            }
+        }
+
+        for (String ocName : MANIFEST_OC_NAMES) {
+            com.fasterxml.jackson.databind.JsonNode ocNode = manifestSchema.get(ocName);
+            ObjectClassInfoBuilder ocBuilder = new ObjectClassInfoBuilder();
+            ocBuilder.setType(ocName);
+
+            com.fasterxml.jackson.databind.JsonNode attrs = ocNode.get("attributes");
+            if (attrs == null || !attrs.isArray()) {
+                LOG.warn("OPENICF-475: OC ''{0}'' has no attributes array; falling back to hardcoded", ocName);
+                return false;
+            }
+
+            for (com.fasterxml.jackson.databind.JsonNode attr : attrs) {
+                String name = attr.has("name") ? attr.get("name").asText() : null;
+                if (name == null || name.isEmpty()) {
+                    continue;
+                }
+
+                String typeName = attr.has("type") ? attr.get("type").asText() : "string";
+                Class<?> javaType = TYPE_MAP.getOrDefault(typeName, String.class);
+
+                // Parse flags
+                EnumSet<AttributeInfo.Flags> flags = EnumSet.noneOf(AttributeInfo.Flags.class);
+                com.fasterxml.jackson.databind.JsonNode flagsNode = attr.get("flags");
+                if (flagsNode != null && flagsNode.isArray()) {
+                    for (com.fasterxml.jackson.databind.JsonNode flagNode : flagsNode) {
+                        String flagStr = flagNode.asText();
+                        AttributeInfo.Flags flag = FLAG_MAP.get(flagStr);
+                        if (flag != null) {
+                            flags.add(flag);
+                        } else {
+                            LOG.warn("OPENICF-475: Unknown flag ''{0}'' on {1}.{2}; skipping flag", flagStr, ocName, name);
+                        }
+                    }
+                }
+
+                if (flags.isEmpty()) {
+                    ocBuilder.addAttributeInfo(AttributeInfoBuilder.build(name, javaType));
+                } else {
+                    ocBuilder.addAttributeInfo(AttributeInfoBuilder.build(name, javaType, flags));
+                }
+            }
+
+            builder.defineObjectClass(ocBuilder.build());
+        }
+
+        LOG.ok("OPENICF-475: Built {0} object classes from manifest objectClassSchema", MANIFEST_OC_NAMES.size());
+        return true;
+    }
+
+    /**
+     * OPENICF-475: Hardcoded fallback for the 5 non-__ACCOUNT__ OCs.
+     * Identical to the pre-475 schema definitions. Used when the manifest
+     * is unavailable or incomplete (pre-474 Lambda, S3 read failure, etc.).
+     */
+    private void buildHardcodedObjectClasses(SchemaBuilder builder) {
+        LOG.ok("OPENICF-475: Building 5 non-__ACCOUNT__ OCs from hardcoded definitions (fallback)");
+
+        // agentKnowledgeBase
         ObjectClassInfoBuilder kb = new ObjectClassInfoBuilder();
         kb.setType(AwsBedrockConstants.OC_KNOWLEDGE_BASE);
-
-        // Common context
         kb.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_PLATFORM, String.class));
         kb.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_AGENT_ID, String.class));
         kb.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_AGENT_VERSION, String.class));
-
-        // KB-specific
         kb.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_KNOWLEDGE_BASE_ID, String.class));
         kb.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_DESCRIPTION, String.class));
         kb.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_STATUS, String.class));
         kb.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_UPDATED_AT, String.class));
-
         builder.defineObjectClass(kb.build());
 
-        // -----------------------------------------------------------------
-        // agentGuardrail object class
-        // -----------------------------------------------------------------
+        // agentGuardrail
         ObjectClassInfoBuilder guardrail = new ObjectClassInfoBuilder();
         guardrail.setType(AwsBedrockConstants.OC_GUARDRAIL);
         guardrail.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_PLATFORM, String.class));
@@ -198,9 +323,7 @@ public class AwsBedrockConnector implements Connector,
         guardrail.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_GUARDRAIL_OUTPUT_ACTION, String.class));
         builder.defineObjectClass(guardrail.build());
 
-        // -----------------------------------------------------------------
-        // agentTool object class (Action Groups)
-        // -----------------------------------------------------------------
+        // agentTool
         ObjectClassInfoBuilder tool = new ObjectClassInfoBuilder();
         tool.setType(AwsBedrockConstants.OC_TOOL);
         tool.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_PLATFORM, String.class));
@@ -215,9 +338,7 @@ public class AwsBedrockConnector implements Connector,
         tool.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_ACTION_GROUP_SCHEMA_URI, String.class));
         builder.defineObjectClass(tool.build());
 
-        // -----------------------------------------------------------------
-        // agentIdentityBinding object class
-        // -----------------------------------------------------------------
+        // agentIdentityBinding
         ObjectClassInfoBuilder idBinding = new ObjectClassInfoBuilder();
         idBinding.setType(AwsBedrockConstants.OC_IDENTITY_BINDING);
         idBinding.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_PLATFORM, String.class));
@@ -228,9 +349,7 @@ public class AwsBedrockConnector implements Connector,
                 AwsBedrockConstants.ATTR_PERMISSIONS, String.class, EnumSet.of(AttributeInfo.Flags.MULTIVALUED)));
         builder.defineObjectClass(idBinding.build());
 
-        // -----------------------------------------------------------------
-        // agentToolCredentials object class (OPENICF-431)
-        // -----------------------------------------------------------------
+        // agentToolCredentials
         ObjectClassInfoBuilder tc = new ObjectClassInfoBuilder();
         tc.setType(AwsBedrockConstants.OC_TOOL_CREDENTIALS);
         tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_ID, String.class));
@@ -246,13 +365,8 @@ public class AwsBedrockConnector implements Connector,
         tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_FUNCTION_SCHEMA, String.class));
         tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_ACCOUNT_ID, String.class));
         tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_REGION, String.class));
-        // OPENICF-432: null until Python Lambda is updated with lambda:GetFunction
         tc.addAttributeInfo(AttributeInfoBuilder.build(AwsBedrockConstants.ATTR_TC_LAMBDA_EXECUTION_ROLE_ARN, String.class));
         builder.defineObjectClass(tc.build());
-
-        Schema schema = builder.build();
-        LOG.ok("Schema built for AwsBedrockConnector.");
-        return schema;
     }
 
     // ---------------------------------------------------------------------
