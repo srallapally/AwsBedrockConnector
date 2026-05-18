@@ -521,29 +521,21 @@ public class AwsBedrockCrudService {
                                               Uid uid,
                                               OperationOptions options) {
 
-        AwsBedrockUtils.IdentityBindingKey key =
-                AwsBedrockUtils.fromIdentityBindingUid(uid.getUidValue());
+        String targetId = uid.getUidValue();
 
-        AwsBedrockClient client = client();
-
-        // OPENICF-436: wildcard bindings (agentId == "*") are stored under WILDCARD_KEY —
-        // bypass listIdentityBindingsForAgent() which would pass "*" literally to ListAgentAliases.
-        List<AgentIdentityBinding> bindings;
-        if ("*".equals(key.agentId())) {
-            Map<String, List<AgentIdentityBinding>> cache = getBindingsCache();
-            bindings = cache.getOrDefault(WILDCARD_KEY, Collections.emptyList());
-        } else {
-            bindings = listIdentityBindingsForAgent(client, key.agentId(), null);
-        }
-
-        for (AgentIdentityBinding binding : bindings) {
-            if (binding.scope.equals(key.scope())
-                    && binding.principalArn.equals(key.principalArn())) {
-                return toIdentityBindingConnectorObject(objectClass, binding);
+        // OPENICF-476: post-476 UIDs are Lambda-computed ab-* hashes that cannot
+        // be parsed into (agentId, scope, principalArn). Scan the full S3 cache
+        // for a matching id instead.
+        Map<String, List<AgentIdentityBinding>> cache = getBindingsCache();
+        for (List<AgentIdentityBinding> bindings : cache.values()) {
+            for (AgentIdentityBinding binding : bindings) {
+                if (targetId.equals(binding.id)) {
+                    return toIdentityBindingConnectorObject(objectClass, binding);
+                }
             }
         }
 
-        LOG.ok("No identity binding found for UID {0}", uid.getUidValue());
+        LOG.ok("No identity binding found for UID {0}", targetId);
         return null;
     }
 
@@ -710,11 +702,11 @@ public class AwsBedrockCrudService {
                         binding.accountId,
                         binding.principalArn);
                 principals.add(packed);
-                // OPENICF-433: UID matches toIdentityBindingUid(agentId, scope, principalArn)
-                bindingIds.add(toIdentityBindingUid(
-                        binding.agentId,
-                        binding.scope,
-                        binding.principalArn));
+                // OPENICF-476: use Lambda-computed id for forward pointers when available.
+                String bindingUid = binding.id != null
+                        ? binding.id
+                        : toIdentityBindingUid(binding.agentId, binding.scope, binding.principalArn);
+                bindingIds.add(bindingUid);
             }
 
             if (!principals.isEmpty()) {
@@ -1109,6 +1101,7 @@ public class AwsBedrockCrudService {
      * Agent + scope (AGENT/ALIAS) + principal + actions (+ optional condition).
      */
     private static final class AgentIdentityBinding {
+        final String id;                // OPENICF-476: Lambda-computed unique ID; null in live API path
         final String agentId;
         final String agentVersion;
         final String scope;          // "AGENT" or "ALIAS"
@@ -1120,7 +1113,8 @@ public class AwsBedrockCrudService {
         final String effect;         // ALLOW / DENY
         final String conditionJson;  // raw JSON of Condition, nullable
 
-        AgentIdentityBinding(String agentId,
+        AgentIdentityBinding(String id,
+                             String agentId,
                              String agentVersion,
                              String scope,
                              String aliasId,
@@ -1130,6 +1124,7 @@ public class AwsBedrockCrudService {
                              List<String> actions,
                              String effect,
                              String conditionJson) {
+            this.id = id;
             this.agentId = agentId;
             this.agentVersion = agentVersion;
             this.scope = scope;
@@ -1153,10 +1148,12 @@ public class AwsBedrockCrudService {
             return null;
         }
 
-        String uidValue = toIdentityBindingUid(
-                binding.agentId,
-                binding.scope,
-                binding.principalArn);
+        // OPENICF-476: use Lambda-computed id as __UID__. The id field is always
+        // present on S3-sourced bindings (post-476 Lambda). Live API path bindings
+        // have id=null but are never surfaced as standalone ConnectorObjects.
+        String uidValue = binding.id != null
+                ? binding.id
+                : toIdentityBindingUid(binding.agentId, binding.scope, binding.principalArn);
 
         ConnectorObjectBuilder b = new ConnectorObjectBuilder();
         b.setObjectClass(objectClass);
@@ -1343,6 +1340,7 @@ public class AwsBedrockCrudService {
                 }
 
                 bindings.add(new AgentIdentityBinding(
+                        null,                     // OPENICF-476: no Lambda id in live API path
                         agentId,
                         agentVersion,
                         "ALIAS",                  // scope
@@ -1432,6 +1430,8 @@ public class AwsBedrockCrudService {
                 JsonNode bindingsNode = root.get("bindings");
                 if (bindingsNode != null && bindingsNode.isArray()) {
                     for (JsonNode b : bindingsNode) {
+                        // OPENICF-476: read Lambda-computed id for use as __UID__
+                        String bindingId = textOrNull(b, "id");
                         String agentArn = textOrNull(b, "agentArn");
                         String aliasArn = textOrNull(b, "aliasArn");
                         String principalType = textOrNull(b, "principalType");
@@ -1471,6 +1471,7 @@ public class AwsBedrockCrudService {
                             }
                             List<String> actions = Collections.singletonList("bedrock:InvokeAgent");
                             AgentIdentityBinding binding = new AgentIdentityBinding(
+                                    bindingId, // OPENICF-476
                                     "*",           // agentId sentinel — wildcard applies to all agents
                                     null,          // agentVersion not encoded in IAM policy
                                     "AGENT",       // scope — consistent with agentIdentityBinding conventions
@@ -1492,6 +1493,7 @@ public class AwsBedrockCrudService {
                         String conditionJson = null;
 
                         AgentIdentityBinding binding = new AgentIdentityBinding(
+                                bindingId, // OPENICF-476
                                 agentId,
                                 null,          // agentVersion not encoded in IAM policy
                                 scope,
