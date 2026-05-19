@@ -222,37 +222,26 @@ public class AwsBedrockClient implements AutoCloseable {
     }
 
     /**
-     * Lists Bedrock agents in the configured region (single page, up to 100).
+     * Lists all Bedrock agents in the configured region, paginating through all pages.
      *
      * @return List of AgentSummary objects.
      * @throws BedrockAgentException if the API call fails.
      */
+    // OPENICF-423: paginate through all pages
     public List<AgentSummary> listAgents() {
-        ListAgentsRequest request = ListAgentsRequest.builder()
-                .maxResults(100)
-                .build();
-
-        ListAgentsResponse response = agentClient.listAgents(request);
-        return response.agentSummaries();
-    }
-
-    /**
-     * Lists agents with pagination support.
-     *
-     * @param maxResults Maximum number of results to return (per page).
-     * @param nextToken  Token for the next page (null or empty for first page).
-     * @return ListAgentsResponse containing agent summaries and next token.
-     * @throws BedrockAgentException if the API call fails.
-     */
-    public ListAgentsResponse listAgentsPaginated(int maxResults, String nextToken) {
-        ListAgentsRequest.Builder builder = ListAgentsRequest.builder()
-                .maxResults(maxResults);
-
-        if (nextToken != null && !nextToken.isEmpty()) {
-            builder.nextToken(nextToken);
-        }
-
-        return agentClient.listAgents(builder.build());
+        List<AgentSummary> results = new ArrayList<>();
+        String nextToken = null;
+        do {
+            ListAgentsRequest.Builder builder = ListAgentsRequest.builder()
+                    .maxResults(100);
+            if (nextToken != null) {
+                builder.nextToken(nextToken);
+            }
+            ListAgentsResponse response = agentClient.listAgents(builder.build());
+            results.addAll(response.agentSummaries());
+            nextToken = response.nextToken();
+        } while (nextToken != null);
+        return results;
     }
 
     /**
@@ -271,16 +260,24 @@ public class AwsBedrockClient implements AutoCloseable {
         return response.agent();
     }
     /**
-     * List aliases for a given Bedrock agent.
+     * List all aliases for a given Bedrock agent, paginating through all pages.
      */
+    // OPENICF-423: paginate through all pages
     public List<AgentAliasSummary> listAgentAliases(String agentId) {
-        ListAgentAliasesRequest request = ListAgentAliasesRequest.builder()
-                .agentId(agentId)
-                .maxResults(100) // TODO: add pagination if you expect >100 aliases
-                .build();
-
-        ListAgentAliasesResponse response = agentClient.listAgentAliases(request);
-        return response.agentAliasSummaries();
+        List<AgentAliasSummary> results = new ArrayList<>();
+        String nextToken = null;
+        do {
+            ListAgentAliasesRequest.Builder builder = ListAgentAliasesRequest.builder()
+                    .agentId(agentId)
+                    .maxResults(100);
+            if (nextToken != null) {
+                builder.nextToken(nextToken);
+            }
+            ListAgentAliasesResponse response = agentClient.listAgentAliases(builder.build());
+            results.addAll(response.agentAliasSummaries());
+            nextToken = response.nextToken();
+        } while (nextToken != null);
+        return results;
     }
 
     // OPENICF-422: Get full details for a single agent alias (needed for alias-level identity model).
@@ -304,41 +301,57 @@ public class AwsBedrockClient implements AutoCloseable {
 
     // OPENICF-422: List collaborators for multi-agent collaboration (connectedAgents attribute).
     /**
-     * Lists the collaborator agents associated with a specific agent.
+     * Lists all collaborator agents associated with a specific agent, paginating through all pages.
      *
      * @param agentId      The unique identifier of the agent.
      * @param agentVersion The version of the agent (e.g., "DRAFT").
      * @return List of AgentCollaboratorSummary objects.
      * @throws BedrockAgentException if the API call fails.
      */
+    // OPENICF-423: paginate through all pages
     public List<AgentCollaboratorSummary> listAgentCollaborators(String agentId, String agentVersion) {
-        ListAgentCollaboratorsRequest request = ListAgentCollaboratorsRequest.builder()
-                .agentId(agentId)
-                .agentVersion(agentVersion)
-                .maxResults(100) // TODO: add pagination if you expect >100 collaborators
-                .build();
-
-        ListAgentCollaboratorsResponse response = agentClient.listAgentCollaborators(request);
-        return response.agentCollaboratorSummaries();
+        List<AgentCollaboratorSummary> results = new ArrayList<>();
+        String nextToken = null;
+        do {
+            ListAgentCollaboratorsRequest.Builder builder = ListAgentCollaboratorsRequest.builder()
+                    .agentId(agentId)
+                    .agentVersion(agentVersion)
+                    .maxResults(100);
+            if (nextToken != null) {
+                builder.nextToken(nextToken);
+            }
+            ListAgentCollaboratorsResponse response = agentClient.listAgentCollaborators(builder.build());
+            results.addAll(response.agentCollaboratorSummaries());
+            nextToken = response.nextToken();
+        } while (nextToken != null);
+        return results;
     }
 
     /**
-     * Lists the action groups (tools) associated with a specific agent.
+     * Lists all action groups (tools) associated with a specific agent, paginating through all pages.
      *
      * @param agentId      The unique identifier of the agent.
      * @param agentVersion The version of the agent (e.g., "DRAFT" for working draft).
      * @return List of ActionGroupSummary objects.
      * @throws BedrockAgentException if the API call fails.
      */
+    // OPENICF-423: paginate through all pages
     public List<ActionGroupSummary> listAgentActionGroups(String agentId, String agentVersion) {
-        ListAgentActionGroupsRequest request = ListAgentActionGroupsRequest.builder()
-                .agentId(agentId)
-                .agentVersion(agentVersion)
-                .maxResults(100)
-                .build();
-
-        ListAgentActionGroupsResponse response = agentClient.listAgentActionGroups(request);
-        return response.actionGroupSummaries();
+        List<ActionGroupSummary> results = new ArrayList<>();
+        String nextToken = null;
+        do {
+            ListAgentActionGroupsRequest.Builder builder = ListAgentActionGroupsRequest.builder()
+                    .agentId(agentId)
+                    .agentVersion(agentVersion)
+                    .maxResults(100);
+            if (nextToken != null) {
+                builder.nextToken(nextToken);
+            }
+            ListAgentActionGroupsResponse response = agentClient.listAgentActionGroups(builder.build());
+            results.addAll(response.actionGroupSummaries());
+            nextToken = response.nextToken();
+        } while (nextToken != null);
+        return results;
     }
     /**
      * Fetches full details for a single agent action group.
@@ -362,22 +375,30 @@ public class AwsBedrockClient implements AutoCloseable {
         return response.agentActionGroup();
     }
     /**
-     * Lists the knowledge bases associated with a specific agent.
+     * Lists all knowledge bases associated with a specific agent, paginating through all pages.
      *
      * @param agentId      The unique identifier of the agent.
      * @param agentVersion The version of the agent (e.g., "DRAFT" for working draft).
      * @return List of AgentKnowledgeBaseSummary objects.
      * @throws BedrockAgentException if the API call fails.
      */
+    // OPENICF-423: paginate through all pages
     public List<AgentKnowledgeBaseSummary> listAgentKnowledgeBases(String agentId, String agentVersion) {
-        ListAgentKnowledgeBasesRequest request = ListAgentKnowledgeBasesRequest.builder()
-                .agentId(agentId)
-                .agentVersion(agentVersion)
-                .maxResults(100)
-                .build();
-
-        ListAgentKnowledgeBasesResponse response = agentClient.listAgentKnowledgeBases(request);
-        return response.agentKnowledgeBaseSummaries();
+        List<AgentKnowledgeBaseSummary> results = new ArrayList<>();
+        String nextToken = null;
+        do {
+            ListAgentKnowledgeBasesRequest.Builder builder = ListAgentKnowledgeBasesRequest.builder()
+                    .agentId(agentId)
+                    .agentVersion(agentVersion)
+                    .maxResults(100);
+            if (nextToken != null) {
+                builder.nextToken(nextToken);
+            }
+            ListAgentKnowledgeBasesResponse response = agentClient.listAgentKnowledgeBases(builder.build());
+            results.addAll(response.agentKnowledgeBaseSummaries());
+            nextToken = response.nextToken();
+        } while (nextToken != null);
+        return results;
     }
 
     /**
